@@ -2384,7 +2384,7 @@ function kickFit(buf, fb, beat){
     const pk = [...P].map(p => p.pk).sort((x, y) => x - y)[Math.floor(P.length * 0.5)];
     let g = P.filter(p => p.pk >= 0.6 * pk); if (g.length < 6) return null;
     let f = fit(g);
-    for (let it = 0; it < 5; it++){ const lim = Math.max(0.003, 2 * f.rms); const g2 = g.filter(p => Math.abs(p.t - f.c - p.b * f.T) <= lim); if (g2.length < Math.max(6, 0.3 * g.length)) break; g = g2; f = fit(g); }
+    for (let it = 0; it < 6; it++){ const res = g.map(p => Math.abs(p.t - f.c - p.b * f.T)).sort((x, y) => x - y), mad = res[Math.floor(res.length / 2)]; const lim = Math.max(0.003, 3 * mad); /* écart médian : insensible aux faux kicks */ const g2 = g.filter(p => Math.abs(p.t - f.c - p.b * f.T) <= lim); if (g2.length < Math.max(6, 0.3 * g.length)) break; g = g2; f = fit(g); }
     if (keep) keep.g = g; return f;
   };
   const nBeats = Math.floor((buf.duration - fb) / beat) - 1; if (nBeats < 32) return null;
@@ -2409,8 +2409,11 @@ function kickFit(buf, fb, beat){
   if (Math.abs(f.T / beat - 1) > 0.01) return null;
   while (f.c - fb > 0.5 * f.T) f = {...f, c: f.c - f.T}; while (fb - f.c > 0.5 * f.T) f = {...f, c: f.c + f.T};
   // BPM rond (200, 150, 174,5…) si la droite le confirme : c'est presque toujours le cas en hard music
-  let bpm = 60 / f.T; const cand = [Math.round(bpm), Math.round(bpm * 2) / 2];
-  for (const cb of cand){ const fs = fit(g, 60 / cb); if (fs.rms <= f.rms * 1.15 + 0.0005){ bpm = cb; f = fs; break; } }
+  // BPM rond : les morceaux sont produits à tempo fixe et rond (200, 150, 174,5…). Un 199,962 est une erreur de mesure
+  // (attaques un peu différentes d'une partie à l'autre) qui ferait glisser les deux sons pendant le mix.
+  let bpm = 60 / f.T;
+  if (Math.abs(bpm - Math.round(bpm)) <= 0.08){ bpm = Math.round(bpm); f = fit(g, 60 / bpm); }
+  else if (Math.abs(bpm * 2 - Math.round(bpm * 2)) <= 0.08){ bpm = Math.round(bpm * 2) / 2; f = fit(g, 60 / bpm); }
   return {fb: f.c, bpm: Math.round(bpm * 1000) / 1000, rms: f.rms, n: g.length};
 }
 function kickLag(o, n, aStart, bStart, rA, rB, t1, t2, beat){

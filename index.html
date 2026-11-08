@@ -1386,11 +1386,14 @@ function makePlan(o, n){
   let aStart, I;
   // Règle principale : la 1re basse de B (B1) part EN MÊME TEMPS que la dernière ligne de basse de A (B2).
   // B est lancé sur son 1er kick (K) exactement la longueur de son intro avant.
-  const Ifull = Math.min(Math.round(introB / 4) * 4, 128);
-  let useB2 = false;
-  if (synced && so.lastBass != null && so.lastBass <= E - 4 * ob && so.lastBass - Ifull * ob >= pos + lead){
-    aStart = so.lastBass - Ifull * ob; I = Ifull; useB2 = true;
-  }
+  // K2 = point de lancement sur A : B2 de A moins la durée K→B1 de B. Le K de B tombe sur K2, donc B1 tombe sur B2.
+  const Ifull = Math.round(introB / 4) * 4;
+  let useB2 = false, why = '';
+  if (!synced) why = 'Tempos trop éloignés';
+  else if (so.lastBass == null) why = `Pas de B2 trouvé sur ${o.id}`;
+  else if (so.lastBass - Ifull * ob < pos + lead) why = 'K2 déjà passé';
+  else if (so.lastBass > E - 4 * ob) why = `B2 trop près de la fin de ${o.id}`;
+  else { aStart = so.lastBass - Ifull * ob; I = Ifull; useB2 = true; }
   if (!useB2){
   // Sinon : le dernier début de bloc de 32 temps de A qui laisse toute l'intro de B avant la fin de A
   I = bgFor(128);
@@ -1412,7 +1415,7 @@ function makePlan(o, n){
   // (si A finit avant la basse de B, A s'éteint simplement à sa fin)
   let cutBar = null;
   for (let k = 1; k <= postBars && dBar + k < eB.length; k++){ if (eB[dBar + k] < 0.5 * refE){ cutBar = k; break; } }
-  return {o, n, rate: r, synced, useB2, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+  return {o, n, rate: r, synced, useB2, why, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + (cutBar || postBars) * 4, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
@@ -1740,7 +1743,8 @@ function drawZoom(d){
   }
   g.globalAlpha = 1;
   const st = d.item && d.item.struct;
-  if (st) [[d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'FIN']].filter(x => x[0] != null).forEach(([tm, col, lb]) => {
+  const k2 = plan && plan.o === d ? plan.oldStart : null;
+  if (st) [[d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'FIN'], [k2, '#ff4fd8', 'K2']].filter(x => x[0] != null).forEach(([tm, col, lb]) => {
     const x = (tm - t0) * pps; if (x < 0 || x > W) return;
     g.fillStyle = col; g.fillRect(x - u, top, 2 * u, h);
     g.font = `${Math.round(11 * u)}px ${LCD_FONT}`; g.textBaseline = 'bottom'; g.fillText(lb, x + 3 * u, top + h);
@@ -1794,6 +1798,10 @@ function drawOver(d){
     const x0 = plan.oldStart / d.duration * W, x1 = (plan.oldStart + plan.totalBeats * d.beatLen) / d.duration * W, xp = plan.P / d.duration * W;
     g.fillStyle = 'rgba(61,255,176,.2)'; g.fillRect(x0, 0, x1 - x0, H);
     g.fillStyle = '#ffffff'; g.fillRect(Math.round(xp - u), 0, 2 * u, H);
+    const xk = plan.oldStart / d.duration * W;
+    g.fillStyle = '#ff4fd8'; g.fillRect(Math.round(xk - u), 0, 2 * u, H);
+    g.font = `${Math.round(H * 0.16)}px ${LCD_FONT}`; g.textBaseline = 'top';
+    g.fillRect(xk, H * 0.62, H * 0.24, H * 0.18); g.fillStyle = '#031216'; g.fillText('K2', xk + H * 0.02, H * 0.63);
   }
   const px = d.duration ? d.pos() / d.duration * W : 0;
   g.fillStyle = 'rgba(5,10,16,.45)'; g.fillRect(0, 0, px, H);
@@ -1845,7 +1853,7 @@ function updateLcd(){
   const cur = Object.values(decks).find(d => d.playing && d.t0 <= ctx.currentTime);
   if (plan){
     const now = ctx.currentTime, id = `${plan.o.id}→${plan.n.id}`, beat = plan.o.beatLen / plan.o.rate;
-    if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = plan.useB2 ? `B1 de ${plan.n.id} calé sur B2 de ${plan.o.id} · départ sur son 1er kick` : `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; }
+    if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = plan.useB2 ? `K de ${plan.n.id} sur K2 de ${plan.o.id} (${plan.Lp} temps) → B1 sur B2` : plan.why ? `${plan.why} : départ sur un bloc de 32` : `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; }
     else if (now < plan.tDrop){ a = `${plan.n.id} ENTRE · SWAP DANS ${Math.ceil((plan.tDrop - now) / beat)} T`; b = `${plan.cfx || 'CFX'} · basses ${plan.n.id} coupées`; }
     else if (now < plan.tDrop + 4 * beat){ a = `BASS SWAP → ${plan.n.id}`; b = `Basses ${plan.o.id} coupées net`; }
     else if (plan.cutBar){ a = `MIX ${id} · BREAK DE ${plan.n.id} DANS ${Math.max(0, Math.ceil((plan.tEnd - now) / beat))} T`; b = `${plan.o.id} sera coupé sur le break`; }

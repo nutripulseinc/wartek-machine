@@ -104,7 +104,7 @@ button{cursor:pointer}
 .synccol{grid-area:s}.playcol{grid-area:p}
 .queue{grid-area:q;background:var(--lcd);border:1px solid rgba(32,230,232,.32);border-radius:6px;display:grid;grid-template-rows:28px 1fr;overflow:hidden;min-width:0;box-shadow:inset 0 0 16px rgba(32,230,232,.08)}
 .qhead{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:0 6px 0 10px;border-bottom:1px solid rgba(32,230,232,.2);font-size:15px;font-weight:500;color:var(--lcd-fg)}
-.qadd{font-size:13px;font-weight:600;border:1px solid var(--neon);color:var(--neon);border-radius:4px;padding:2px 9px;cursor:pointer;white-space:nowrap;box-shadow:0 0 8px rgba(32,230,232,.3)}
+.qadd{font-size:13px;background:transparent;font-family:inherit;line-height:1.3;font-weight:600;border:1px solid var(--neon);color:var(--neon);border-radius:4px;padding:2px 9px;cursor:pointer;white-space:nowrap;box-shadow:0 0 8px rgba(32,230,232,.3)}
 .qlist{list-style:none;margin:0;padding:3px 0;overflow-y:auto;touch-action:pan-y;min-height:0}
 .qlist li{display:grid;grid-template-columns:16px 1fr 24px;gap:6px;align-items:center;padding:1px 4px 1px 10px;font-family:var(--font-lcd);font-size:14px;color:var(--lcd-fg);min-width:0}
 .qlist li:first-child .qt{color:#fff;text-shadow:0 0 6px rgba(32,230,232,.8)}
@@ -230,6 +230,13 @@ button{cursor:pointer}
 .dlist .n{font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dlist .m{font-family:var(--font-lcd);font-size:14px;color:var(--mute)}
 .dlist .dbtn{padding:0}
+.qplist li{grid-template-columns:40px 1fr 100px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.qplist .ck{width:30px;height:30px;border-radius:6px;border:2px solid var(--mute);display:grid;place-items:center;font-family:var(--font-lcd);font-size:15px;font-weight:700;color:#031216}
+.qplist li[aria-checked="true"] .ck{background:var(--qc,#20e6e8);border-color:var(--qc,#20e6e8);box-shadow:0 0 10px var(--qc,#20e6e8)}
+.qplist li[aria-checked="true"] .n{color:var(--qc,#20e6e8)}
+.qplist li.inq .m::after{content:" · en file"}
+.qp-ok:not(:disabled){border-color:var(--go);color:var(--go)}
+.qp-ok:disabled{opacity:.45}
 .dlist .dbtn.a{color:var(--a)} .dlist .dbtn.b{color:var(--b)}
 .dlist li.now .n{color:var(--go)}
 .dnote{color:var(--mute);font-size:16px;padding:14px 0;line-height:1.4;display:block!important;border:0!important}
@@ -605,6 +612,19 @@ body[data-skin="psy"] .bline{background:linear-gradient(90deg,transparent,#3dffb
         <button class="dbtn" data-close>Fermer</button>
       </div>
       <ul class="dlist" id="dlist"></ul>
+    </div>
+  </div>
+
+  <div class="drawer" id="qpick" hidden>
+    <div class="dpanel" role="dialog" aria-label="Ajouter à la file">
+      <div class="dhead">
+        <h2 id="qp-title">À suivre</h2>
+        <label class="dbtn" id="qp-imp">Du téléphone</label>
+        <button class="dbtn" id="qp-all">Tout</button>
+        <button class="dbtn qp-ok" id="qp-ok" disabled>Ajouter</button>
+        <button class="dbtn" data-close>Fermer</button>
+      </div>
+      <ul class="dlist qplist" id="qp-list"></ul>
     </div>
   </div>
 
@@ -1307,7 +1327,7 @@ function panelMarkup(id){
           </div>
         </div>
         <div class="queue">
-          <div class="qhead"><span>À suivre</span><label class="qadd" for="${id}-qfile">+ Ajouter</label><input type="file" id="${id}-qfile" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden></div>
+          <div class="qhead"><span>À suivre</span><button class="qadd" data-qpick="${id}">+ Ajouter</button><input type="file" id="${id}-qfile" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden></div>
           <ol class="qlist" id="${id}-qlist"></ol>
         </div>
         <div class="synccol">
@@ -1420,7 +1440,7 @@ function bindDeck(d){
   });
   d.ui.sync.addEventListener('click', () => syncDeck(d));
   el('qfile').addEventListener('change', e => {
-    const files = [...e.target.files]; e.target.value = '';
+    const files = [...e.target.files]; e.target.value = ''; $('qpick').hidden = true;
     if (!files.length) return;
     const at = addFiles(files);
     d.queue.push(...lib.slice(at, at + files.length)); renderQueue(d); saveQueues();
@@ -1920,6 +1940,42 @@ $('dlist').addEventListener('click', e => {
   }
   const b = e.target.closest('button[data-i]'); if (b){ $('drawer').hidden = true; loadItem(+b.dataset.i, b.dataset.to); }
 });
+// Choix de plusieurs sons d'un coup pour la file « À suivre » : on coche dans l'ordre voulu
+let qpDeck = null, qpSel = [];
+function openQPick(id){
+  qpDeck = decks[id]; qpSel = [];
+  $('qp-title').textContent = `À suivre · ${id}`;
+  $('qp-imp').htmlFor = `${id}-qfile`;
+  $('qpick').style.setProperty('--qc', id === 'A' ? 'var(--a)' : 'var(--b)');
+  if (!lib.length){ $(`${id}-qfile`).click(); return; }
+  renderQPick(); $('qpick').hidden = false;
+}
+function renderQPick(){
+  const d = qpDeck;
+  $('qp-list').innerHTML = lib.map((t, i) => { const k = qpSel.indexOf(t);
+    return `<li data-qp="${i}" role="checkbox" aria-checked="${k >= 0}" class="${d.queue.includes(t) || d.item === t ? 'inq' : ''}">
+      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${esc(t.name)}</span><span class="m">${t.bpm ? t.bpm.toFixed(1) + ' BPM' : '— BPM'}</span></li>`; }).join('')
+    + '<li class="dnote">Touche les sons dans l\'ordre où tu veux les jouer (le numéro = l\'ordre), puis « Ajouter ». « Du téléphone » importe de nouveaux fichiers : sur le téléphone, appuie longuement sur un fichier pour en cocher plusieurs.</li>';
+  const n = qpSel.length, ok = $('qp-ok');
+  ok.disabled = !n; ok.textContent = n ? `Ajouter (${n})` : 'Ajouter';
+  $('qp-all').textContent = n === lib.length ? 'Aucun' : 'Tout';
+}
+$('qp-list').addEventListener('click', e => {
+  const li = e.target.closest('li[data-qp]'); if (!li) return;
+  const t = lib[+li.dataset.qp], k = qpSel.indexOf(t);
+  if (k >= 0) qpSel.splice(k, 1); else qpSel.push(t);
+  renderQPick();
+});
+$('qp-all').addEventListener('click', () => { qpSel = qpSel.length === lib.length ? [] : lib.slice(); renderQPick(); });
+$('qp-ok').addEventListener('click', () => {
+  const d = qpDeck, items = qpSel.slice(); if (!d || !items.length) return;
+  $('qpick').hidden = true;
+  d.queue.push(...items); renderQueue(d); saveQueues();
+  if (!d.buffer && !d.playing && !d.loading){ const t = d.queue.shift(); renderQueue(d); saveQueues(); loadItem(lib.indexOf(t), d.id); }
+  toast(`${items.length} son${items.length > 1 ? 's' : ''} ajouté${items.length > 1 ? 's' : ''} à la file de la platine ${d.id}.`, 2600);
+  if (auto && endOfList){ const cur = Object.values(decks).find(x => x.playing); if (cur){ endOfList = false; queueNext(cur, other(cur)); } }
+});
+document.addEventListener('click', e => { const b = e.target.closest('[data-qpick]'); if (b) openQPick(b.dataset.qpick); });
 $('lib-file').addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; if (files.length){ addFiles(files); renderLib(); } });
 document.querySelectorAll('.opt').forEach(o => o.addEventListener('click', () => { if (!o.disabled){ setRoute(o.dataset.mode); hpHintShown = true; } }));
 if (!document.documentElement.requestFullscreen) $('fs').hidden = true;

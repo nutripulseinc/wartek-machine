@@ -1892,7 +1892,7 @@ const DIAG = [];
 function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struct || {};
   let e = []; try { e = barEnergy(t); } catch(_){}
   const mx = Math.max(1e-9, ...e), around = b => b == null ? null : e.slice(Math.max(0, b - 4), b + 4).map(v => Math.round(100 * v / mx)).join(' ');
-  return {nom: t.name, bpm: t.bpm, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar,
+  return {nom: t.name, bpm: t.bpm, mesure: t.dbInfo || null, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar,
     basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
@@ -2298,6 +2298,8 @@ async function loadItem(i, deckId){
     if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
       const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
       // K posé à la main : il choisit QUEL kick est le départ, mais reste collé pile sur la grille mesurée
+      if (!t.peaks) t.peaks = computePeaks(t.buffer);
+      { const db = downbeat(t); t.firstBeat = t.start = db.fb; t.dbInfo = db; }
       t.autoBpm = t.bpm; t.autoFb = t.firstBeat;
       if (t.markers && t.markers.bpm){ t.bpm = t.markers.bpm; t.firstBeat = t.start = t.markers.grid ?? t.firstBeat; t.manualGrid = true; }   // grille réglée à la main dans l'éditeur
       else if (t.markers && t.markers.kick != null){ const bl = 60 / t.bpm; t.firstBeat = t.start = t.firstBeat + Math.round((t.markers.kick - t.firstBeat) / bl) * bl; } }
@@ -2623,6 +2625,27 @@ function localShift(t, at){
   if (mad > 0.006 || Math.abs(med) > 0.45 * T) return null;
   if (Math.abs(med) < 0.0015) return 0;
   return med;
+}
+// K et début des mesures :
+// 1) on remonte la grille jusqu'au tout premier temps où le son joue (le morceau peut démarrer à 0,04 s : ce kick-là compte) ;
+// 2) on cherche sur quel temps (1, 2, 3 ou 4) tombent les grands changements du morceau (arrivée des basses, breaks, drops) :
+//    c'est le premier temps de la mesure. K = premier temps de mesure qui joue → B1, B2, F tombent pile sur les mesures.
+function downbeat(t){
+  const T = 60 / t.bpm, rms = t.peaks.rms, R = RES, n = rms.length;
+  const lev = (a, b) => { let m = 0, c = 0; for (let i = Math.max(0, Math.floor(a * R)); i < Math.min(n, Math.ceil(b * R)); i++){ m += rms[i]; c++; } return c ? m / c : 0; };
+  let fb = t.firstBeat;
+  // un temps « joue » s'il y a du son ET une attaque (ou si c'est le tout début du fichier)
+  const hit = tb => lev(tb - 0.01, tb + 0.05) > 0.06 && (tb < 0.03 || lev(tb - 0.005, tb + 0.03) > 1.4 * lev(tb - 0.07, tb - 0.025));
+  while (fb - T > -0.03 && hit(fb - T)) fb -= T;
+  // énergie par temps et sauts d'un temps à l'autre
+  const nb = Math.floor((t.buffer.duration - fb) / T); if (nb < 32) return {fb, q: 0, sure: 0};
+  const E = []; for (let b = 0; b < nb; b++) E.push(Math.log(lev(fb + b * T, fb + (b + 1) * T) + 1e-3));
+  const sc = [0, 0, 0, 0];
+  for (let b = 1; b < nb; b++){ const j = Math.abs(E[b] - E[b - 1]); if (j > 0.25) sc[b % 4] += j; }
+  const order = [0, 1, 2, 3].sort((a, b) => sc[b] - sc[a]), q = order[0];
+  const sure = sc[order[1]] > 0 ? sc[q] / sc[order[1]] : 9;
+  if (q !== 0 && sure >= 1.5) fb += q * T;   // les changements tombent clairement sur un autre temps : la mesure commence là
+  return {fb, q, sure: +sure.toFixed(2)};
 }
 function kickLag(o, n, aStart, bStart, rA, rB, t1, t2, beat){
   if (!o.item || !n.item) return null;

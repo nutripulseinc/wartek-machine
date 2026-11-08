@@ -1912,7 +1912,9 @@ function earCheck(plan, now){
   if (prev == null || Math.abs(prev - lag) > 0.003){ lockInfo = {t: now, txt: `ÉCOUTE… ${Math.round(lag * 1000)} ms`}; return; }
   // On ne corrige que pendant l'intro de B (avant le swap des basses), 4 coups au plus
   if (now > plan.tDrop - 2 * beat || (plan.earFix || 0) >= 4){ lockInfo = {t: now, txt: `ÉCART ${Math.round(lag * 1000)} ms`}; return; }
-  plan.earFix = (plan.earFix || 0) + 1;
+  // Écart inverse de la correction d'avant : l'oreille hésite entre deux attaques → on ne touche plus à rien
+  if (plan.earPrevFix != null && Math.sign(plan.earPrevFix) !== Math.sign(lag) && Math.abs(lag + plan.earPrevFix) < 0.012){ plan.earFix = 99; lockInfo = {t: now, txt: 'OREILLE ? (doute)'}; return; }
+  plan.earFix = (plan.earFix || 0) + 1; plan.earPrevFix = lag;
   n.nudge(lag, Math.max(0.25, Math.abs(lag) / 0.03)); plan.earLast = null;
   lockInfo = {t: now, txt: `RECALAGE ${n.id} ${lag > 0 ? '+' : ''}${Math.round(lag * 1000)} ms`};
 }
@@ -2347,21 +2349,28 @@ function kickFit(buf, fb, beat){
   const sr = buf.sampleRate, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
   const a = 1 - Math.exp(-2 * Math.PI * 600 / sr), ms = Math.round(sr / 1000);
   const attack = (tp, hw) => {   // attaque du kick autour de tp (± hw s) → {t, pk} ou null
-    const s0 = Math.floor((tp - hw - 0.08) * sr), s1 = Math.floor((tp + hw) * sr); if (s0 < 0 || s1 >= L.length) return null;
-    let y1 = 0, y2 = 0, acc = 0, c = 0; const e2 = [];
-    for (let i = s0; i < s1; i++){ const x = (L[i] + R[i]) * 0.5; y1 += a * (x - y1); y2 += a * (y1 - y2); acc += y2 * y2; if (++c === ms){ e2.push(acc / ms); acc = 0; c = 0; } }
-    // énergie lissée sur 4 ms (sinon les ondulations des basses font sauter la mesure)
-    const env = e2.map((v, k) => { let q = 0, n = 0; for (let j = Math.max(0, k - 3); j <= k; j++){ q += e2[j]; n++; } return Math.sqrt(q / n); });
-    const w0 = 80, w1 = env.length - 1; let m = 0, mi = -1;
-    for (let k = w0; k <= w1; k++) if (env[k] > m){ m = env[k]; mi = k; }
-    if (mi < 0) return null;
-    const floor = Math.min(...env.slice(w0 - 20, w0 + 5)); if (m < 2.5 * floor + 1e-6) return null;
-    const th = floor + 0.5 * (m - floor);
-    let k = mi; while (k > w0 - 20 && env[k - 1] > th) k--;          // remonte jusqu'au début du coup
-    let k0 = w0 - 20; while (k0 < k && env[k0] <= th) k0++;          // et premier passage du seuil
-    k = Math.min(k, k0);
-    const fr = env[k] > env[k - 1] ? (th - env[k - 1]) / (env[k] - env[k - 1]) : 0;   // à la fraction de ms près
-    return {t: s0 / sr + (k - 1 + fr + 0.5) / 1000 - 0.0015, pk: m};
+    // Sons denses (Frenchcore, Hardcore) : pas de « silence » entre les kicks. On cherche donc la MONTÉE la plus raide
+    // de l'énergie (en log, sur 3 ms) : c'est le claquement du kick, même noyé dans la basse et la disto.
+    const s0 = Math.floor((tp - hw - 0.03) * sr), s1 = Math.floor((tp + hw + 0.01) * sr); if (s0 < 0 || s1 >= L.length) return null;
+    // 3 bandes (grave < 600 Hz, médium 0,8–4 kHz, aigu > 4 kHz), suiveur de crête dans chacune : monte instantanément
+    // sur l'attaque, redescend lentement. Le kick = la montée commune la plus raide (le « clac » + le coup dans le grave),
+    // même quand le kick est saturé et collé à la basse comme en Frenchcore.
+    const b8 = 1 - Math.exp(-2 * Math.PI * 800 / sr), b4 = 1 - Math.exp(-2 * Math.PI * 4000 / sr), rel = Math.exp(-1 / (0.03 * sr));
+    let y1 = 0, y2 = 0, m8 = 0, m4 = 0, h4 = 0, p0 = 0, p1 = 0, p2 = 0, x0 = 0, x1 = 0, x2 = 0, c = 0; const lg = [[], [], []];
+    for (let i = Math.max(0, s0 - Math.floor(0.04 * sr)); i < s1; i++){
+      const x = (L[i] + R[i]) * 0.5; y1 += a * (x - y1); y2 += a * (y1 - y2);
+      m8 += b8 * (x - m8); const hi8 = x - m8; m4 += b4 * (hi8 - m4); h4 += b4 * (x - h4); const hi4 = x - h4;
+      const v0 = Math.abs(y2), v1 = Math.abs(m4), v2 = Math.abs(hi4);
+      p0 = v0 > p0 ? v0 : p0 * rel; p1 = v1 > p1 ? v1 : p1 * rel; p2 = v2 > p2 ? v2 : p2 * rel;
+      if (i < s0) continue; if (p0 > x0) x0 = p0; if (p1 > x1) x1 = p1; if (p2 > x2) x2 = p2;
+      if (++c === ms){ lg[0].push(Math.log(x0 + 1e-6)); lg[1].push(Math.log(x1 + 1e-6)); lg[2].push(Math.log(x2 + 1e-6)); x0 = x1 = x2 = 0; c = 0; }
+    }
+    const W = [1, 0.6, 0.3];   // le grave compte le plus : un charley ou un clap ne doit pas passer pour un kick
+    const rise = k => { let r = 0; for (let q = 0; q < 3; q++){ const d = lg[q][k] - lg[q][k - 3]; if (d > 0) r += W[q] * d; } return r; };
+    let best = 0, bk = -1;
+    for (let k = 33; k < lg[0].length - 10 && k <= 30 + 2 * hw * 1000; k++){ const r = rise(k); if (r > best){ best = r; bk = k; } }
+    if (bk < 0 || best < 0.3) return null;                      // montée trop faible : pas de kick net ici
+    return {t: s0 / sr + (bk - 2) / 1000, pk: best};
   };
   const fit = (pts, Tfix) => {   // droite t = c + b·T (moindres carrés)
     const n = pts.length; let sb = 0, st = 0; for (const p of pts){ sb += p.b; st += p.t; }
@@ -2370,21 +2379,35 @@ function kickFit(buf, fb, beat){
     const c = mt - T * mb; let r = 0; for (const p of pts) r += (p.t - c - p.b * T) ** 2;
     return {c, T, rms: Math.sqrt(r / n)};
   };
+  // droite robuste : seulement les attaques franches, puis on retire les points loin de la droite
+  const robust = (P, keep) => {
+    const pk = [...P].map(p => p.pk).sort((x, y) => x - y)[Math.floor(P.length * 0.5)];
+    let g = P.filter(p => p.pk >= 0.6 * pk); if (g.length < 6) return null;
+    let f = fit(g);
+    for (let it = 0; it < 5; it++){ const lim = Math.max(0.003, 2 * f.rms); const g2 = g.filter(p => Math.abs(p.t - f.c - p.b * f.T) <= lim); if (g2.length < Math.max(6, 0.3 * g.length)) break; g = g2; f = fit(g); }
+    if (keep) keep.g = g; return f;
+  };
   const nBeats = Math.floor((buf.duration - fb) / beat) - 1; if (nBeats < 32) return null;
-  let line = {c: fb, T: beat}, pts = [];
-  const hw = Math.min(0.06, 0.2 * beat);
-  for (let b = 0; b < nBeats; b++){
-    const r = attack(line.c + b * line.T, hw); if (r) pts.push({b, t: r.t, pk: r.pk});
-    if (b % 16 === 15 && pts.length >= 12){   // on réajuste la droite au fil du morceau
-      const pk = [...pts].map(p => p.pk).sort((x, y) => x - y)[Math.floor(pts.length / 2)];
-      const g = pts.filter(p => p.pk >= 0.4 * pk); if (g.length >= 8){ const f = fit(g); if (Math.abs(f.T / beat - 1) < 0.01) line = f; }
+  const hw = Math.min(0.09, 0.3 * beat);
+  // On suit les kicks en partant de 4 calages possibles (temps, ¼, ½, ¾) : si l'analyse s'est accrochée
+  // à un contretemps (basse, clap), le bon calage gagne parce que ses attaques sont les plus franches.
+  const track = c0 => {
+    let line = {c: c0, T: beat}; const pts = [];
+    for (let b = 0; b < nBeats; b++){
+      const r = attack(line.c + b * line.T, hw); if (r) pts.push({b, t: r.t, pk: r.pk});
+      if (b % 8 === 7 && pts.length >= 8){ const f = robust(pts); if (f && Math.abs(f.T / beat - 1) < 0.01) line = f; }
     }
-  }
-  if (pts.length < 24) return null;
-  const pkm = [...pts].map(p => p.pk).sort((x, y) => x - y)[Math.floor(pts.length / 2)];
-  let g = pts.filter(p => p.pk >= 0.4 * pkm), f = fit(g);
-  for (let it = 0; it < 3; it++){ const lim = Math.max(0.004, 2.5 * f.rms); const g2 = g.filter(p => Math.abs(p.t - f.c - p.b * f.T) <= lim); if (g2.length < 16) break; g = g2; f = fit(g); }
-  if (Math.abs(f.T / beat - 1) > 0.01 || Math.abs(f.c - fb) > 0.2 * beat) return null;
+    if (pts.length < 24) return null;
+    const kp = {}, f = robust(pts, kp); if (!f || kp.g.length < 16) return null;
+    let sc = 0; for (const p of kp.g) sc += p.pk;
+    return {f, g: kp.g, score: sc / (1 + f.rms * 1000)};
+  };
+  let bestT = null;
+  for (let q = 0; q < 4; q++){ const r = track(fb + q * beat / 4); if (r){ r.score *= q === 0 ? 1.6 : 1; if (!bestT || r.score > bestT.score) bestT = r; } }   // le calage de l'analyse garde un petit avantage
+  if (!bestT) return null;
+  let f = bestT.f; const g = bestT.g;
+  if (Math.abs(f.T / beat - 1) > 0.01) return null;
+  while (f.c - fb > 0.5 * f.T) f = {...f, c: f.c - f.T}; while (fb - f.c > 0.5 * f.T) f = {...f, c: f.c + f.T};
   // BPM rond (200, 150, 174,5…) si la droite le confirme : c'est presque toujours le cas en hard music
   let bpm = 60 / f.T; const cand = [Math.round(bpm), Math.round(bpm * 2) / 2];
   for (const cb of cand){ const fs = fit(g, 60 / cb); if (fs.rms <= f.rms * 1.15 + 0.0005){ bpm = cb; f = fs; break; } }

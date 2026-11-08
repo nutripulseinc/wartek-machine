@@ -2362,7 +2362,9 @@ function phaseLock(){
     late = xcorrLag(a, bx, L, step);
     if (late == null){ lockInfo = {t: now, txt: 'CALAGE ?'}; return; }
   }
-  if (Math.abs(late) < 0.003){ lockInfo = {t: now, txt: 'CALÉ ✓'}; return; }
+  if (Math.abs(late) < 0.003){ lockInfo = {t: now, txt: 'SYNC ✓'}; return; }
+  // Grilles mesurées + même BPM + lancement exact : les deux sons avancent en miroir, on ne touche plus au pitch
+  if (master.item.fitInfo && slave.item.fitInfo){ lockInfo = {t: now, txt: `ÉCART ${Math.round(late * 1000)} ms`}; return; }
   // Si le son se décale toujours dans le même sens, son tempo n'est pas tout à fait le bon : on corrige aussi le pitch de base
   let f = 1; const lc = slave.lastCorr;
   slave.lastCorr = {t: now, late};

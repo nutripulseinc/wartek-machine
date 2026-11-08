@@ -101,11 +101,30 @@ button{cursor:pointer}
 .lcd.small canvas{top:32px;height:calc(100% - 32px);cursor:pointer}
 
 .synccol,.playcol{display:grid;justify-items:center;align-content:center;gap:4px;text-align:center;min-height:0}
-.playcol .startbtn{width:106px;height:106px}
-.playcol .retour{height:38px;padding:0 16px;font-size:15px}
-.playcol .cap2{display:none}
-.synccol .syncbtn{height:84px;width:80px}
-.synccol .cap2{display:none}.synccol .cap{white-space:nowrap}
+.playcol{grid-template-columns:auto;align-content:center;gap:8px}
+.playcol .startbtn{width:84px;height:84px}
+.playcol .startbtn::before{inset:8px!important;border-width:4px!important}
+.playcol .startbtn .face{inset:15px!important}
+.playcol .startbtn svg{width:30px;height:30px}
+/* Boutons de lecture façon platine CDJ : CUE au-dessus de PLAY, BEAT SYNC sous l'afficheur BPM */
+.cuebtn{width:62px;height:62px;border-radius:50%;position:relative;border:0;padding:0;touch-action:manipulation;cursor:pointer;
+  background:radial-gradient(circle,#1d2224 0 58%,#050707 59% 62%,#2b3235 63% 70%,#0b0e0f 71%);box-shadow:0 3px 7px rgba(0,0,0,.65);
+  display:grid;place-items:center;align-content:center;gap:0;color:#ffb13d;font:800 15px/1 var(--font-ui,inherit);letter-spacing:.1em}
+.cuebtn::before{content:"";position:absolute;inset:6px;border-radius:50%;border:3px solid rgba(255,177,61,.5);box-shadow:0 0 8px rgba(255,177,61,.35);transition:border-color .1s, box-shadow .1s}
+.cuebtn span{position:relative;text-shadow:0 0 6px rgba(255,177,61,.7)}
+.cuebtn small{position:relative;font-size:9px;font-weight:600;letter-spacing:.08em;color:#d9c4a4;text-transform:uppercase;margin-top:2px}
+.cuebtn:active::before{border-color:#ffb13d;box-shadow:0 0 20px rgba(255,177,61,.95),inset 0 0 10px rgba(255,177,61,.6)}
+.cuebtn:active{transform:scale(.97)}
+.bpmlcd{width:84px;height:50px;border-radius:6px;background:#020607;border:1px solid #000;box-shadow:inset 0 0 0 2px #1d2a2c,inset 0 0 14px rgba(0,0,0,.9);
+  display:grid;place-items:center;align-content:center;gap:1px;font-family:var(--font-lcd);color:#20e6e8;text-shadow:0 0 6px rgba(32,230,232,.8)}
+.bpmlcd span{font-size:21px;line-height:1}.bpmlcd small{font-size:9px;letter-spacing:.25em;color:#5d8d91;text-shadow:none}
+.bsync{width:84px;height:62px;border-radius:7px;position:relative;border:1px solid #000;padding:10px 0 0;touch-action:manipulation;cursor:pointer;
+  background:linear-gradient(#30363a,#181c1e);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 3px 7px rgba(0,0,0,.65);
+  display:grid;place-items:center;align-content:center;gap:1px;color:#cfe3e5;font:800 13px/1.05 var(--font-ui,inherit);letter-spacing:.14em}
+.bsync .led{position:absolute;top:7px;left:16px;right:16px;height:4px;border-radius:2px;background:#25373b;box-shadow:inset 0 1px 1px rgba(0,0,0,.7)}
+.bsync.lit{color:#fff}.bsync.lit .led{background:#20e6e8;box-shadow:0 0 9px #20e6e8,0 0 3px #fff}
+.bsync:active{transform:translateY(1px);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 1px 3px rgba(0,0,0,.7)}
+.synccol{gap:8px!important}
 .synccol{grid-area:s}.playcol{grid-area:p}
 .queue{grid-area:q;background:var(--lcd);border:1px solid rgba(32,230,232,.32);border-radius:6px;display:grid;grid-template-rows:28px 1fr;overflow:hidden;min-width:0;box-shadow:inset 0 0 16px rgba(32,230,232,.08)}
 .qhead{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:0 6px 0 10px;border-bottom:1px solid rgba(32,230,232,.2);font-size:15px;font-weight:500;color:var(--lcd-fg)}
@@ -154,7 +173,8 @@ button{cursor:pointer}
 
 .fxsec{display:grid;grid-template-rows:26px 150px 22px 1fr 96px;gap:6px;padding:8px 10px 10px;justify-items:center}
 .fxsec .sechead{justify-content:center;font-size:17px;white-space:nowrap;padding:0}
-.fxbtns{display:grid;gap:9px;width:100%;align-content:center}
+.fxbtns{display:grid;grid-template-columns:1fr 1fr;gap:5px;width:100%;align-content:center}
+.fxbtns .fxb{height:31px;font-size:13px!important;padding:0 2px;white-space:nowrap;letter-spacing:0}
 .fxb{height:38px;border-radius:6px;border:1px solid #0a0b0d;background:linear-gradient(#3a3c41,#26282c);font-size:17px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;touch-action:manipulation;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 2px 3px rgba(0,0,0,.5)}
 .fxb[aria-pressed="true"]{background:linear-gradient(#1e5bb0,#174a91);box-shadow:0 0 0 2px var(--blue),0 0 14px rgba(46,140,255,.7);color:#fff}
@@ -1184,6 +1204,11 @@ async function makeSamples(){
 
 /* ---------- Platine ---------- */
 const ECHO_DIV = [0.25, 0.5, 0.75, 1, 1.5, 2];
+const SYNC_DIV = [0.125, 0.25, 0.5, 0.75, 1, 1.5, 2];   // en temps : 1/8 … 2 temps
+const SYNCED_FX = ['echo', 'delay', 'pingpong', 'spiral', 'helix', 'roll', 'trans'];
+const FX_LIST = [['delay', 'Delay'], ['echo', 'Echo'], ['pingpong', 'Ping Pong'], ['spiral', 'Spiral'], ['helix', 'Helix'], ['roll', 'Roll'], ['trans', 'Trans'],
+  ['filter', 'Filter'], ['flanger', 'Flanger'], ['phaser', 'Phaser'], ['chorus', 'Chorus'], ['reverb', 'Reverb'], ['crush', 'Crush'], ['noise', 'Noise']];
+let NOISE_BUF = null;
 class Deck {
   constructor(id){
     this.id = id; this.buffer = null; this.src = null; this.playing = false;
@@ -1204,7 +1229,7 @@ class Deck {
     this.post.connect(this.dry); this.dry.connect(this.out);
     this.gate = gain(1); this.out.connect(this.gate); this.gate.connect(this.fader); this.fader.connect(this.xf); this.xf.connect(masterBus); this.fader.connect(this.an);
     this.out.connect(this.cue); this.cue.connect(cueBus);
-    const lfo = (freq, depth, target) => { const o = c.createOscillator(); o.frequency.value = freq; const g = gain(depth); o.connect(g); g.connect(target); o.start(); return {o, g}; };
+    const lfo = (freq, depth, target) => { const o = c.createOscillator(); o.frequency.value = freq; const g = gain(depth); o.connect(g); if (target) g.connect(target); o.start(); return {o, g}; };
     // Flanger
     this.flD = c.createDelay(0.05); this.flD.delayTime.value = 0.004; this.flL = lfo(0.25, 0.003, this.flD.delayTime);
     this.flFb = gain(0.6); this.flD.connect(this.flFb); this.flFb.connect(this.flD);
@@ -1227,6 +1252,39 @@ class Deck {
     this.crush.curve = cv;
     const crBp = c.createBiquadFilter(); crBp.type = 'bandpass'; crBp.frequency.value = 1800; crBp.Q.value = 0.5;
     this.crWet = gain(0); this.post.connect(this.crush); this.crush.connect(crBp); crBp.connect(this.crWet); this.crWet.connect(this.out);
+    // --- Effets façon Pioneer (Beat FX / Color FX) ---
+    // Delay : répétitions nettes calées sur le tempo
+    this.dlD = c.createDelay(4); this.dlFb = gain(0.4); this.dlWet = gain(0);
+    this.post.connect(this.dlD); this.dlD.connect(this.dlFb); this.dlFb.connect(this.dlD); this.dlD.connect(this.dlWet); this.dlWet.connect(this.out);
+    // Ping Pong : gauche / droite en alternance
+    { this.ppL = c.createDelay(4); this.ppR = c.createDelay(4); this.ppFb = gain(0.5); const mg = c.createChannelMerger(2); this.ppWet = gain(0); const mono = gain(0.5);
+      this.post.connect(mono); mono.connect(this.ppL); this.ppL.connect(mg, 0, 0); this.ppL.connect(this.ppR); this.ppR.connect(mg, 0, 1); this.ppR.connect(this.ppFb); this.ppFb.connect(this.ppL);
+      mg.connect(this.ppWet); this.ppWet.connect(this.out); }
+    // Spiral : écho dont le temps de retard tourne (les répétitions montent et descendent)
+    this.spD = c.createDelay(4); this.spFb = gain(0.6); this.spWet = gain(0); this.spL = lfo(0.25, 0.01, this.spD.delayTime);
+    { const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5000; this.post.connect(this.spD); this.spD.connect(lp); lp.connect(this.spFb); this.spFb.connect(this.spD); this.spD.connect(this.spWet); this.spWet.connect(this.out); }
+    // Helix : le son capté tourne en boucle en montant en hauteur à chaque passage
+    this.hxD = c.createDelay(4); this.hxFb = gain(0.8); this.hxWet = gain(0);
+    { const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 2; this.hxDepth = gain(0); o.connect(this.hxDepth); this.hxDepth.connect(this.hxD.delayTime); o.start(); this.hxOsc = o;
+      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 180;
+      this.post.connect(this.hxD); this.hxD.connect(hp); hp.connect(this.hxFb); this.hxFb.connect(this.hxD); this.hxD.connect(this.hxWet); this.hxWet.connect(this.out); }
+    // Roll : capte une tranche (1/8 à 2 temps) et la répète en boucle
+    this.rlIn = gain(0); this.rlD = c.createDelay(4); this.rlFb = gain(0); this.rlWet = gain(0); this.rollOn = false;
+    this.post.connect(this.rlIn); this.rlIn.connect(this.rlD); this.rlD.connect(this.rlFb); this.rlFb.connect(this.rlD); this.rlD.connect(this.rlWet); this.rlWet.connect(this.out);
+    // Trans : coupe le son en rythme sur les temps
+    this.trans = gain(1); this.post.disconnect(this.dry); this.post.connect(this.trans); this.trans.connect(this.dry); this.trOsc = null; this.trKey = '';
+    // Phaser : 4 filtres passe-tout balayés
+    { this.phWet = gain(0); this.phAp = []; let prev = this.post; this.phL = lfo(0.3, 600, null);
+      for (let k = 0; k < 4; k++){ const ap = c.createBiquadFilter(); ap.type = 'allpass'; ap.frequency.value = 900; ap.Q.value = 0.7; this.phL.g.connect(ap.frequency); prev.connect(ap); prev = ap; this.phAp.push(ap); }
+      this.phFb = gain(0); const fd = c.createDelay(0.01); fd.delayTime.value = 0.003; prev.connect(this.phFb); this.phFb.connect(fd); fd.connect(this.phAp[0]);
+      prev.connect(this.phWet); this.phWet.connect(this.out); }
+    // Filter : filtre résonant qui balaie tout seul
+    { this.afF = c.createBiquadFilter(); this.afF.type = 'lowpass'; this.afF.frequency.value = 700; this.afF.Q.value = 6; this.afL = lfo(0.5, 2400, this.afF.detune);
+      this.afWet = gain(0); this.post.connect(this.afF); this.afF.connect(this.afWet); this.afWet.connect(this.out); }
+    // Noise : souffle blanc filtré ajouté (montée)
+    { if (!NOISE_BUF){ NOISE_BUF = c.createBuffer(1, c.sampleRate * 2, c.sampleRate); const nd = NOISE_BUF.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1; }
+      const ns = c.createBufferSource(); ns.buffer = NOISE_BUF; ns.loop = true; this.nzF = c.createBiquadFilter(); this.nzF.type = 'highpass'; this.nzF.frequency.value = 1000; this.nzF.Q.value = 2;
+      this.nzWet = gain(0); ns.connect(this.nzF); this.nzF.connect(this.nzWet); this.nzWet.connect(this.out); ns.start(); }
   }
   makeIR(sec){
     sec = Math.round(sec * 4) / 4; if (sec === this.irLen) return; this.irLen = sec;
@@ -1303,7 +1361,33 @@ class Deck {
     const needRv = this.fx === 'reverb' && a > 0;
     if (needRv && !this.rvOn){ this.post.connect(this.conv); this.rvOn = true; clearTimeout(this.rvOffT); }
     else if (!needRv && this.rvOn){ clearTimeout(this.rvOffT); this.rvOffT = setTimeout(() => { if (this.rvOn && !(this.fx === 'reverb' && this.fxAmt > 0)){ try { this.post.disconnect(this.conv); } catch(e){} this.rvOn = false; } }, 6500); }
-    const dryCut = (this.fx === 'flanger' || this.fx === 'chorus') ? 1 - 0.4 * a : 1;
+    // --- nouveaux effets : RATE = division du temps pour les effets calés, sinon vitesse ; FEEDBACK = répétitions / résonance
+    const bs = 60 / ((this.bpm || 120) * this.rate), sd = SYNC_DIV[Math.round(r * (SYNC_DIV.length - 1))], dt = clamp(sd * bs, 0.02, 3.9);
+    this.dlD.delayTime.setTargetAtTime(dt, now, T); this.dlFb.gain.setTargetAtTime(fb * 0.8, now, T); this.dlWet.gain.setTargetAtTime(on('delay') * a * 0.85, now, T);
+    this.ppL.delayTime.setTargetAtTime(dt, now, T); this.ppR.delayTime.setTargetAtTime(dt, now, T); this.ppFb.gain.setTargetAtTime(fb * 0.75, now, T); this.ppWet.gain.setTargetAtTime(on('pingpong') * a * 1.1, now, T);
+    this.spD.delayTime.setTargetAtTime(dt, now, T); this.spFb.gain.setTargetAtTime(0.45 + fb * 0.45, now, T); this.spL.o.frequency.setTargetAtTime(0.12 / sd, now, T); this.spL.g.gain.setTargetAtTime(dt * 0.12, now, T); this.spWet.gain.setTargetAtTime(on('spiral') * a * 0.8, now, T);
+    this.hxD.delayTime.setTargetAtTime(dt, now, T); this.hxOsc.frequency.setTargetAtTime(1 / dt, now, T); this.hxDepth.gain.setTargetAtTime(on('helix') * dt * 0.06, now, T); this.hxFb.gain.setTargetAtTime(0.55 + fb * 0.4, now, T); this.hxWet.gain.setTargetAtTime(on('helix') * a * 0.85, now, T);
+    // Roll : au déclenchement on capte une tranche, puis on la répète tant que l'effet est ouvert
+    const rollNow = on('roll') && a > 0.02;
+    if (rollNow && (!this.rollOn || this.rollDt !== dt)){ this.rlD.delayTime.setValueAtTime(dt, now); this.rlIn.gain.cancelScheduledValues(now); this.rlIn.gain.setValueAtTime(1, now); this.rlIn.gain.setValueAtTime(0, now + dt); this.rlFb.gain.setValueAtTime(1, now); this.rollOn = true; this.rollDt = dt; }
+    if (!rollNow && this.rollOn){ this.rlIn.gain.cancelScheduledValues(now); this.rlIn.gain.setValueAtTime(0, now); this.rlFb.gain.setTargetAtTime(0, now, 0.05); this.rollOn = false; }
+    this.rlWet.gain.setTargetAtTime(rollNow ? 1 : 0, now, 0.01);
+    // Trans : coupe sur la grille (on redémarre l'oscillateur pile sur un temps)
+    const trNow = on('trans') && a > 0.02, key = trNow ? `${sd}|${bs.toFixed(5)}` : '';
+    if (key !== this.trKey){
+      if (this.trOsc){ try { this.trOsc.stop(); } catch(e){} this.trOsc = null; }
+      this.trans.gain.cancelScheduledValues(now); this.trans.gain.setTargetAtTime(1, now, 0.005);
+      if (trNow){ const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = 1 / (sd * bs); const g = gain(a / 2); o.connect(g); g.connect(this.trans.gain);
+        let st = now + 0.03; if (this.playing && this.bpm){ const bl = this.beatLen, p = this.pos(), nx = this.firstBeat + Math.ceil((p - this.firstBeat) / bl) * bl; st = now + (nx - p) / this.rate; }
+        this.trans.gain.setValueAtTime(1 - a / 2, st); o.start(st); this.trOsc = o; this.trG = g; }
+      this.trKey = key;
+    } else if (trNow && this.trG){ this.trG.gain.setTargetAtTime(a / 2, now, T); this.trans.gain.setTargetAtTime(1 - a / 2, now, T); }
+    // Phaser / Filter / Noise : RATE = vitesse du balayage, FEEDBACK = résonance
+    this.phL.o.frequency.setTargetAtTime(0.05 + r * 3, now, T); this.phFb.gain.setTargetAtTime(fb * 0.7, now, T); this.phWet.gain.setTargetAtTime(on('phaser') * a * 0.9, now, T);
+    this.afL.o.frequency.setTargetAtTime(0.05 + r * 4, now, T); this.afF.Q.value = 1 + fb * 14; this.afWet.gain.setTargetAtTime(on('filter') * a, now, T);
+    this.nzF.frequency.setTargetAtTime(300 * Math.pow(40, r), now, T); this.nzF.Q.value = 0.7 + fb * 8; this.nzWet.gain.setTargetAtTime(on('noise') * a * 0.22, now, T);
+    this.crWet.gain.setTargetAtTime(on('crush') * a, now, T);
+    const dryCut = (this.fx === 'flanger' || this.fx === 'chorus' || this.fx === 'phaser') ? 1 - 0.4 * a : this.fx === 'roll' && rollNow ? 1 - a : this.fx === 'filter' ? 1 - a : this.fx === 'crush' ? 1 - 0.85 * a : 1;
     this.dry.gain.setTargetAtTime(dryCut, now, T);
   }
   setFilter(v){
@@ -1412,14 +1496,13 @@ function panelMarkup(id){
           <ol class="qlist" id="${id}-qlist"></ol>
         </div>
         <div class="synccol">
-          <span class="cap">Synchro<br>BPM</span>
-          <button class="syncbtn" id="${id}-sync" aria-label="Synchroniser le BPM sur l'autre platine"><svg viewBox="0 0 24 24"><path d="M4 9a8 8 0 0 1 14-3l2 2M20 4v4h-4M20 15a8 8 0 0 1-14 3l-2-2M4 20v-4h4"/></svg><span id="${id}-bpm">—</span></button>
-          <span class="cap2">Sync BPM</span>
+          <div class="bpmlcd"><span id="${id}-bpm">—</span><small>BPM</small></div>
+          <button class="bsync" id="${id}-sync" aria-label="Synchroniser le BPM sur l'autre platine"><i class="led"></i><b>BEAT</b><b>SYNC</b></button>
         </div>
         <div class="playcol">
+          <button class="cuebtn" id="${id}-back" aria-label="CUE : retour au point de départ"><span>CUE</span><small>retour</small></button>
           <button class="startbtn idle" id="${id}-play" aria-label="Lecture / pause"><span class="face">${ICON_PLAY}</span></button>
-          <span class="cap2" id="${id}-playlbl">Start mix</span>
-          <button class="retour" id="${id}-back" aria-label="Retour au point de départ"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h3v14H5zM20 5v14L9 12z"/></svg>Retour</button>
+          <span class="cap2" id="${id}-playlbl" hidden>Start mix</span>
         </div>
       </div>
       <div class="pads">${[0,1,2,3].map(i => `
@@ -1432,12 +1515,7 @@ function panelMarkup(id){
       <div class="sechead">Module effets</div>
       <div class="kwrap" style="width:150px;height:150px;place-items:center" id="${id}-amtwrap"><div class="ticks" id="${id}-ticks"></div></div>
       <span class="cap2">FX amount</span>
-      <div class="fxbtns">
-        <button class="fxb" id="${id}-fx-flanger" aria-pressed="true">Flanger</button>
-        <button class="fxb" id="${id}-fx-echo" aria-pressed="false">Echo</button>
-        <button class="fxb" id="${id}-fx-reverb" aria-pressed="false">Reverb</button>
-        <button class="fxb" id="${id}-fx-chorus" aria-pressed="false">Chorus</button>
-      </div>
+      <div class="fxbtns">${FX_LIST.map(([k, lb]) => `<button class="fxb" id="${id}-fx-${k}" aria-pressed="${k === 'flanger'}">${lb}</button>`).join('')}</div>
       <div class="two" id="${id}-rf"></div>
     </div>
   </div>`;
@@ -1555,7 +1633,7 @@ function bindDeck(d){
     s.style.left = `${75 + Math.cos(a) * R}px`; s.style.top = `${75 + Math.sin(a) * R}px`; ticks.appendChild(s);
   }
   new Ctl(kEl, {min: 0, max: 10, value: 0, color: '#20e6e8', label: `FX amount ${id}`, onChange: v => { d.fxAmt = v / 10; d.applyFx(); }});
-  const FX = ['flanger', 'echo', 'reverb', 'chorus'];
+  const FX = FX_LIST.map(x => x[0]);
   FX.forEach(name => el(`fx-${name}`).addEventListener('click', () => {
     d.fx = name; d.applyFx();
     FX.forEach(n => el(`fx-${n}`).setAttribute('aria-pressed', String(n === name)));
@@ -1563,7 +1641,7 @@ function bindDeck(d){
   }));
   const rf = el('rf');
   knob(rf, 'Rate', 'mid', {min: 0, max: 100, value: 40, color: '#20e6e8',
-    format: v => d.fx === 'echo' ? `${ECHO_DIV[Math.round(v / 100 * (ECHO_DIV.length - 1))]} T` : `${Math.round(v)}%`,
+    format: v => d.fx === 'echo' ? `${ECHO_DIV[Math.round(v / 100 * (ECHO_DIV.length - 1))]} T` : SYNCED_FX.includes(d.fx) ? `${SYNC_DIV[Math.round(v / 100 * (SYNC_DIV.length - 1))]} T` : `${Math.round(v)}%`,
     onChange: v => { d.fxRate = v / 100; d.applyFx(); }});
   knob(rf, 'Feedback', 'mid', {min: 0, max: 100, value: 50, color: '#20e6e8', format: v => `${Math.round(v)}%`,
     onChange: v => { d.fxFb = v / 100; d.applyFx(); }});
@@ -1657,6 +1735,8 @@ function fxAt(d, v, t, tc = 0.05){
   const a = v.amt || 0, nm = v.name, set = (g, x) => g.gain.setTargetAtTime(x, t, tc);
   set(d.flWet, nm === 'flanger' ? a * 0.85 : 0); set(d.chWet, 0); set(d.rvWet, 0);
   set(d.ecWet, nm === 'echo' ? a * 0.85 : 0); set(d.crWet, nm === 'crush' ? a : 0);
+  [d.dlWet, d.ppWet, d.spWet, d.hxWet, d.rlWet, d.phWet, d.afWet, d.nzWet].forEach(g => set(g, 0)); if (d.rollOn){ d.rlFb.gain.setTargetAtTime(0, t, 0.05); d.rollOn = false; }
+  if (d.trOsc){ try { d.trOsc.stop(t); } catch(e){} d.trOsc = null; d.trKey = ''; } d.trans.gain.cancelScheduledValues(t); set(d.trans, 1);
   set(d.dry, nm === 'flanger' ? 1 - 0.4 * a : nm === 'crush' ? 1 - 0.85 * a : 1);
   if (nm === 'flanger'){ d.flL.o.frequency.setTargetAtTime(0.18, t, 0.1); d.flFb.gain.setTargetAtTime(0.75, t, 0.1); }
   if (nm === 'echo'){ d.ecFb.gain.setTargetAtTime(v.fb ?? 0.6, t, 0.02); d.ecD.delayTime.setTargetAtTime((v.rate ?? 0.75) * 60 / (d.bpm * d.rate), t, 0.01); }

@@ -83,8 +83,8 @@ button{cursor:pointer}
 .sec{background:linear-gradient(180deg,#27292d,#1f2124);border:1px solid #34363b;border-radius:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);min-height:0}
 .mainsec{display:grid;grid-template-rows:26px 1fr 132px;gap:6px;padding:8px 12px 10px}
 .sechead{display:flex;justify-content:space-between;font-size:19px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;padding:0 6px}
-.loadgrid{display:grid;grid-template-columns:1fr 90px 124px;grid-template-rows:118px 1fr;grid-template-areas:"scr q q" "scr s p";gap:10px;min-height:0;border-bottom:1px solid #34363b;padding-bottom:10px}
-.screens{grid-area:scr;display:grid;grid-template-rows:1fr 108px;gap:10px;min-width:0;min-height:0}
+.loadgrid{display:grid;grid-template-columns:1fr 90px 124px;grid-template-rows:84px 1fr minmax(0,1.25fr);grid-template-areas:"scr q q" "scr s p" "ov ov ov";gap:10px;min-height:0;border-bottom:1px solid #34363b;padding-bottom:10px}
+.screens{display:contents}.screens .lcd.big{grid-area:scr}.screens .lcd.small{grid-area:ov}
 .lcd{position:relative;background:var(--lcd);border-radius:6px;border:1px solid #000;box-shadow:inset 0 0 0 2px #303338,inset 0 0 24px rgba(0,0,0,.8);min-height:0;min-width:0;overflow:hidden}
 .lcd canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;font-family:var(--font-lcd);font-size:24px;color:var(--lcd-fg);letter-spacing:.06em;text-shadow:0 0 10px rgba(80,170,255,.6);pointer-events:none;padding-bottom:28px}
@@ -100,7 +100,10 @@ button{cursor:pointer}
 .fname .mk [data-mk="kick"]{color:#20e6e8}.fname .mk [data-mk="bass"]{color:#3dffb0}.fname .mk [data-mk="bass2"]{color:#e5ff3d}.fname .mk [data-mk="out"]{color:#ff3d6e}
 .lcd.small canvas{top:24px;height:calc(100% - 24px);cursor:pointer}
 
-.synccol,.playcol{display:grid;justify-items:center;align-content:center;gap:6px;text-align:center}
+.synccol,.playcol{display:grid;justify-items:center;align-content:center;gap:4px;text-align:center;min-height:0}
+.playcol .startbtn{width:92px;height:92px}
+.synccol .syncbtn{height:66px}
+.synccol .cap2{display:none}.synccol .cap{white-space:nowrap}
 .synccol{grid-area:s}.playcol{grid-area:p}
 .queue{grid-area:q;background:var(--lcd);border:1px solid rgba(32,230,232,.32);border-radius:6px;display:grid;grid-template-rows:28px 1fr;overflow:hidden;min-width:0;box-shadow:inset 0 0 16px rgba(32,230,232,.08)}
 .qhead{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:0 6px 0 10px;border-bottom:1px solid rgba(32,230,232,.2);font-size:15px;font-weight:500;color:var(--lcd-fg)}

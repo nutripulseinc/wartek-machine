@@ -1195,11 +1195,20 @@ class Deck {
     this.applyFx();
   }
   // Petit coup de pitch pour rattraper un décalage (en secondes) en 0,8 s, puis retour au tempo exact
-  nudge(shift, T = 0.8){
-    if (!this.playing || this.nudging) return;
-    const base = this.rate; this.nudging = true;
-    this.setRate(base * (1 + shift / T));
-    setTimeout(() => { this.setRate(base); this.nudging = false; this.nudgeEnd = ctx.currentTime; }, T * 1000);
+  nudge(shift, T = 0.8, f = 1){
+    if (!this.playing || this.nudging || !this.src) return;
+    const base = this.rate, nb = base * f, fast = base * (1 + shift / T), src = this.src; this.nudging = true;
+    this.setRate(fast);
+    const tEnd = ctx.currentTime + T;
+    src.playbackRate.setValueAtTime(nb, tEnd);   // retour au tempo pile au bon moment (horloge audio)
+    setTimeout(() => {
+      if (this.src === src && this.playing){
+        const now = ctx.currentTime;
+        this.offset = this.offset + (tEnd - this.t0) * fast + Math.max(0, now - tEnd) * nb; this.t0 = now;
+        this.rate = nb; this.applyFx();
+      }
+      this.nudging = false; this.nudgeEnd = ctx.currentTime;
+    }, T * 1000 + 20);
   }
   applyFx(){
     const a = this.fxAmt, r = this.fxRate, fb = this.fxFb, now = ctx.currentTime, T = 0.04, on = n => this.fx === n ? 1 : 0;
@@ -1719,6 +1728,10 @@ function schedule(d, key, v, t, tc){ plan.events.push({d, key, v, t, tc}); }
 function startTransition(dt){
   const {o, n} = plan, now = ctx.currentTime, T0 = now + Math.max(0.02, dt), beat = o.beatLen / o.rate, L = plan.Lp;
   // Si on est en retard sur K2, B démarre un peu plus loin dans son morceau : son K reste collé au K2 de A
+  // Pré-calage : avant de lancer B, on compare ses kicks à ceux de A sur l'intro et autour de B1/B2.
+  // Décalage → on déplace le départ de B ; écart de tempo → on corrige son pitch. Tout est réglé avant qu'on l'entende.
+  const fix = preAlign(o, n, plan);
+  if (fix){ plan.rate *= fix.f; plan.bStart += fix.lag * plan.rate; plan.preFix = fix; }
   const late0 = Math.max(0, 0.02 - dt) * plan.rate;
   const tDrop = now + (plan.P - o.pos()) / o.rate;
   plan.events = []; plan.T0 = T0; plan.tDrop = tDrop;
@@ -2178,6 +2191,39 @@ let lastDraw = 0;
 // S'ils ne tombent pas ensemble, petit coup de pitch sur le son qui entre ; une fois calé, on ne touche plus.
 let lastLock = 0, lockInfo = null;
 const envAt = (t, sec) => { const x = sec * t.envRate, i = Math.floor(x), f = x - i, e = t.env; return i >= 0 && i + 1 < e.length ? e[i] * (1 - f) + e[i + 1] * f : 0; };
+// Décalage (s, temps réel) des kicks de B par rapport à ceux de A, sur une fenêtre de temps réel [t1, t2) après le départ
+function kickLag(o, n, aStart, bStart, rA, rB, t1, t2, beat){
+  if (!o.item?.env || !n.item?.env) return null;
+  const step = 0.002, N = Math.floor((t2 - t1) / step), L = Math.floor(0.45 * beat / step); if (N < 60) return null;
+  const a = new Float32Array(N), bx = new Float32Array(N + 2 * L);
+  for (let k = 0; k < N; k++) a[k] = envAt(o.item, aStart + (t1 + k * step) * rA);
+  for (let k = -L; k < N + L; k++) bx[k + L] = envAt(n.item, bStart + (t1 + k * step) * rB);
+  let best = -1, bj = 0, sum = 0;
+  for (let j = -L; j <= L; j++){ let c = 0; for (let k = 0; k < N; k++) c += a[k] * bx[k + j + L]; sum += c; if (c > best){ best = c; bj = j; } }
+  const mean = sum / (2 * L + 1);
+  if (best <= 0 || best < 1.5 * mean) return null;
+  // affinage sous l'échantillon (parabole)
+  const cAt = j => { let c = 0; for (let k = 0; k < N; k++) c += a[k] * bx[k + j + L]; return c; };
+  let fr = 0; if (Math.abs(bj) < L){ const y0 = cAt(bj - 1), y2 = cAt(bj + 1), den = y0 - 2 * best + y2; if (den < 0) fr = clamp(0.5 * (y0 - y2) / den, -0.5, 0.5); }
+  return (bj + fr) * step;
+}
+function preAlign(o, n, plan){
+  if (!plan.synced) return null;
+  const rA = o.rate, rB = plan.rate, beat = o.beatLen / rA, I = plan.Lp;
+  const span = Math.min(16, Math.max(8, I || 16)) * beat;
+  const lag1 = kickLag(o, n, plan.oldStart, plan.bStart, rA, rB, 0, span, beat);
+  if (lag1 == null) return null;
+  let f = 1, lag = lag1;
+  if (I >= 32){
+    // Second contrôle juste avant B1/B2 : si le décalage a bougé, les tempos ne sont pas exactement égaux
+    const t2 = I * beat, lag2 = kickLag(o, n, plan.oldStart, plan.bStart, rA, rB, t2 - span, t2, beat);
+    if (lag2 != null && Math.abs(lag2 - lag1) < 0.4 * beat){
+      const d = clamp((lag2 - lag1) / (t2 - span), -0.004, 0.004);   // dérive en s par s
+      if (Math.abs(lag2 - lag1) > 0.002){ f = 1 + d; lag = lag1 - d * span / 2; }   // décalage ramené au tout premier kick
+    }
+  }
+  return {lag, f};
+}
 function phaseLock(){
   const now = ctx.currentTime; if (now - lastLock < 1) return; lastLock = now;
   const A = decks.A, B = decks.B;
@@ -2196,8 +2242,12 @@ function phaseLock(){
   const mean = sum / (2 * L + 1); if (best < 1.6 * mean || best <= 0) return;   // pas assez de kicks nets pour juger
   const late = bj * step;   // > 0 : le son qui entre est en retard
   if (Math.abs(late) < 0.003){ lockInfo = {t: now, txt: 'CALÉ ✓'}; return; }
+  // Si le son se décale toujours dans le même sens, son tempo n'est pas tout à fait le bon : on corrige aussi le pitch de base
+  let f = 1; const lc = slave.lastCorr;
+  if (lc && Math.sign(lc.late) === Math.sign(late) && now - lc.t < 20) f = clamp(1 + late / (now - lc.t), 0.997, 1.003);
+  slave.lastCorr = {t: now, late};
   // Coup de pitch comme un DJ : 4 % maximum, plus long si le décalage est grand
-  slave.nudge(late, Math.max(0.3, Math.abs(late) / 0.04));
+  slave.nudge(late, Math.max(0.3, Math.abs(late) / 0.04), f);
   lockInfo = {t: now, txt: `CALAGE ${slave.id} ${late > 0 ? '+' : ''}${Math.round(late * 1000)} ms`};
 }
 

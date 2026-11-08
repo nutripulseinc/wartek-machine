@@ -989,6 +989,14 @@ function structureOf(t){
   { let i = bo - 1, gap = 0; while (i > bi){ if (e[i] >= thr){ gap = 0; i--; } else if (++gap >= 2) break; else i--; }
     let st = i + gap; const r4 = Math.round(st / 4) * 4; if (Math.abs(st - r4) <= 1) st = r4;
     if (st > bi + 4 && st < bo) b2 = st; }
+  // Grosse basse : basses fortes ET son plein (le gros pic de la wave). B1 et B2 sont recalés dessus,
+  // pour ne pas tomber sur une pré-basse ou une montée plus légère.
+  { const rs = [...r].sort((a, b) => a - b), rRef = rs[Math.floor(nb * 0.75)] || 0;
+    const big = i => i >= 0 && i < nb && e[i] >= 0.72 * ref && r[i] >= 0.8 * rRef;
+    const big2 = i => big(i) && big(i + 1);
+    const refine = (from, to) => { for (let i = from; i <= to && i < nb - 1; i++) if (big2(i)){ const r4 = Math.round(i / 4) * 4; return Math.abs(i - r4) <= 1 && big(r4) ? r4 : i; } return from; };
+    if (m.bass == null && !big2(bi)) bi = refine(bi, Math.min(bo - 2, bi + 16));
+    if (b2 != null && !big2(b2)){ const nb2 = refine(b2, Math.min(bo - 2, b2 + 16)); if (nb2 > bi + 4) b2 = nb2; } }
   if (m.bass2 != null) b2 = Math.max(bi, Math.round((m.bass2 - t.firstBeat) / bar));
   t.struct = {drop: t.firstBeat + bi * bar, outro: t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph,
               lastBass: b2 == null ? null : t.firstBeat + b2 * bar, lastBar: b2};
@@ -1682,13 +1690,14 @@ function makePlan(o, n){
   // - sinon A reste avec B jusqu'à la fin de sa basse (F), 16 mesures au plus, calé par blocs de 4 mesures.
   const roomBars = Math.max(1, Math.floor((E - P) / (4 * ob)));
   const postBars = clamp(roomBars, 1, 16);
-  let cutBar = null;
-  for (let k = 1; k <= postBars && dBar + k < eB.length; k++){ if (eB[dBar + k] < 0.5 * refE){ cutBar = k; break; } }
-  let cutBars = cutBar;
-  if (!cutBars){
-    const toF = Math.round((so.outro - P) / (4 * ob));
-    cutBars = clamp(toF >= 4 ? Math.round(toF / 4) * 4 : 4, 4, 16);
-    cutBars = Math.min(cutBars, roomBars);
+  // Point C = la vraie coupure de A (fin de sa basse, F) : A joue jusqu'au bout de sa ligne, pas de coupe au milieu.
+  // Seulement si F est introuvable / trop loin : on regarde si B part en break.
+  let cutBar = null, cutBars;
+  const toF = Math.round((so.outro - P) / (4 * ob));
+  if (toF >= 1 && toF <= 32) cutBars = Math.min(toF, roomBars);
+  else {
+    for (let k = 2; k <= postBars && dBar + k + 1 < eB.length; k++){ if (eB[dBar + k] < 0.4 * refE && eB[dBar + k + 1] < 0.4 * refE){ cutBar = k; break; } }
+    cutBars = cutBar || Math.min(16, roomBars);
   }
   return {o, n, rate: r, synced, useB2, why, cutBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + cutBars * 4 + 8, style: STYLES[mixCount % STYLES.length], scheduled: false};
@@ -1783,10 +1792,11 @@ function startTransition(dt){
   const tCut = tDrop + plan.cutBars * bar, onBreak = !!plan.cutBar;
   if (onBreak){ schedule(o, 'vol', 0, tCut, 0.02); plan.tFade = tCut; plan.tEnd = tCut + 0.3; }
   else {
-    const fb = Math.min(16, plan.cutBars * 4), t0 = tCut - fb * beat;
-    for (let i = 1; i <= fb; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / fb, 1.3)), t0 + i * beat, 0.12);
-    schedule(o, 'fx', {name: 'reverb', amt: 0.25}, t0 + fb / 2 * beat, 0.6);
-    plan.tFade = t0; plan.tEnd = tCut + 0.3;
+    // A reste plein jusqu'à sa coupure (C), puis s'efface en 4 temps avec un voile de reverb
+    const t0 = tCut - beat, fb = 5;
+    schedule(o, 'fx', {name: 'reverb', amt: 0.25}, tCut - 2 * beat, 0.3);
+    for (let i = 1; i <= fb; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / fb, 1.5)), t0 + i * beat, 0.1);
+    plan.tFade = t0; plan.tEnd = t0 + fb * beat + 0.3;
   }
   plan.events.sort((a, b) => a.t - b.t);
   plan.scheduled = true;
@@ -2197,7 +2207,7 @@ const envAt = (t, sec) => { const x = sec * t.envRate, i = Math.floor(x), f = x 
 // Décalage (s, temps réel) des kicks de B par rapport à ceux de A, sur une fenêtre de temps réel [t1, t2) après le départ
 function kickLag(o, n, aStart, bStart, rA, rB, t1, t2, beat){
   if (!o.item?.env || !n.item?.env) return null;
-  const step = 0.002, N = Math.floor((t2 - t1) / step), L = Math.floor(0.45 * beat / step); if (N < 60) return null;
+  const step = 0.002, N = Math.floor((t2 - t1) / step), L = Math.floor(0.2 * beat / step);   // jamais plus de 1/5 de temps : sinon on risque de caler un kick sur une basse if (N < 60) return null;
   const a = new Float32Array(N), bx = new Float32Array(N + 2 * L);
   for (let k = 0; k < N; k++) a[k] = envAt(o.item, aStart + (t1 + k * step) * rA);
   for (let k = -L; k < N + L; k++) bx[k + L] = envAt(n.item, bStart + (t1 + k * step) * rB);
@@ -2236,7 +2246,7 @@ function phaseLock(){
   if (Math.abs(A.bpm * A.rate - B.bpm * B.rate) > 0.08) return;
   const master = plan && plan.scheduled ? plan.o : (A.t0 <= B.t0 ? A : B), slave = other(master);
   const beat = 60 / (master.bpm * master.rate), W = Math.min(8 * beat, since - 0.05), step = 0.002;
-  const N = Math.floor(W / step), L = Math.floor(0.48 * beat / step); if (N < 60) return;
+  const N = Math.floor(W / step), L = Math.floor(0.2 * beat / step); if (N < 60) return;
   const pm = master.pos(), ps = slave.pos(), a = new Float32Array(N), bx = new Float32Array(N + 2 * L);
   for (let k = 0; k < N; k++){ const back = (N - k) * step; a[k] = envAt(master.item, pm - back * master.rate); }
   for (let k = -L; k < N + L; k++){ const back = (N - k) * step; bx[k + L] = envAt(slave.item, ps - back * slave.rate); }

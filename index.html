@@ -1757,6 +1757,7 @@ function paramAt(d, key, v, t, tc = 0.03){
 function schedule(d, key, v, t, tc){ plan.events.push({d, key, v, t, tc}); }
 
 function startTransition(dt){
+  try { ensureEar(); } catch(e){}
   if (plan.synced) plan.rate = tempoRatio(plan.o, plan.n);   // tempo de A à cet instant précis
   const fix = preAlign(plan.o, plan.n, plan);   // calcul fait AVANT de lire l'horloge : il ne retarde pas le départ
   if (fix){ plan.bStart += fix.lag * plan.rate; plan.preFix = fix; }
@@ -1844,6 +1845,59 @@ function finishTransition(){
   if (auto) queueNext(n, o);
 }
 
+/* ---------- L'oreille : on écoute VRAIMENT les deux sons qui sortent ----------
+   Chaque platine est captée juste après sa lecture (avant EQ et fader), sur la même horloge audio.
+   On compare les attaques des deux sons réellement joués : c'est l'écart que l'on entend, quelles que soient
+   l'analyse, la latence du téléphone ou les marqueurs. Pendant l'intro de B (basses coupées, volume bas),
+   un ou deux petits coups de pitch le recalent, comme un DJ au casque. Après le swap des basses, on n'y touche plus. */
+const EAR = {n: 12000, a: null, b: null, w: 0, node: null, ea: 0, eb: 0, acc: [0, 0], c: 0, hop: 0, la: 0, lb: 0};
+function ensureEar(){
+  if (EAR.node) return;
+  EAR.a = new Float32Array(EAR.n); EAR.b = new Float32Array(EAR.n); EAR.hop = Math.round(ctx.sampleRate / 1000);
+  const mg = ctx.createChannelMerger(2), sp = ctx.createScriptProcessor(2048, 2, 1), mute = ctx.createGain(); mute.gain.value = 0;
+  decks.A.input.connect(mg, 0, 0); decks.B.input.connect(mg, 0, 1); mg.connect(sp); sp.connect(mute); mute.connect(ctx.destination);
+  sp.onaudioprocess = e => {
+    const xa = e.inputBuffer.getChannelData(0), xb = e.inputBuffer.getChannelData(1), h = EAR.hop;
+    for (let i = 0; i < xa.length; i++){
+      EAR.acc[0] += xa[i] * xa[i]; EAR.acc[1] += xb[i] * xb[i];
+      if (++EAR.c === h){
+        const va = Math.sqrt(EAR.acc[0] / h), vb = Math.sqrt(EAR.acc[1] / h), k = EAR.w % EAR.n;
+        // attaque = saut d'énergie (en log) par rapport aux 15 ms d'avant : un seul pic net au tout début de chaque kick
+        EAR.a[k] = Math.max(0, Math.log((va + 1e-4) / (EAR.la + 1e-4))); EAR.b[k] = Math.max(0, Math.log((vb + 1e-4) / (EAR.lb + 1e-4)));
+        EAR.la += (va - EAR.la) / 15; EAR.lb += (vb - EAR.lb) / 15;
+        EAR.acc[0] = EAR.acc[1] = 0; EAR.c = 0; EAR.w++;
+      }
+    }
+  };
+  EAR.node = sp;
+}
+// Écart entendu (s) entre le son qui entre et celui qui sort, sur les « sec » dernières secondes ; > 0 = celui qui entre est en retard
+function earLag(n, sec, beat){
+  if (!EAR.node) return null;
+  const L = Math.floor(0.2 * beat * 1000), N = Math.floor(sec * 1000) - 2 * L; if (N < 600) return null;
+  const end = EAR.w - L, start = end - N; if (start - L < 0) return null;
+  const nA = n.id === 'B', a = new Float32Array(N), bx = new Float32Array(N + 2 * L);
+  const ref = nA ? EAR.a : EAR.b, inc = nA ? EAR.b : EAR.a;
+  for (let k = 0; k < N; k++) a[k] = ref[(start + k) % EAR.n];
+  for (let k = -L; k < N + L; k++) bx[k + L] = inc[(start + k + EAR.n) % EAR.n];
+  return xcorrLag(a, bx, L, 0.001);
+}
+function earCheck(plan, now){
+  const {o, n} = plan; if (plan.manual || !EAR.node || !o.playing || !n.playing) return;
+  const beat = o.beatLen / o.rate;
+  const free = now - Math.max(plan.T0, n.nudgeEnd || 0, o.nudgeEnd || 0);   // secondes écoutées depuis le dernier réglage
+  if (n.nudging || o.nudging || free < 2.2 || now - (plan.earT || 0) < 1) return;
+  plan.earT = now;
+  const lag = earLag(n, Math.min(6, free - 0.3), beat);
+  if (lag == null){ lockInfo = {t: now, txt: 'OREILLE ?'}; return; }
+  plan.earLast = lag;
+  if (Math.abs(lag) < 0.0025){ lockInfo = {t: now, txt: 'CALÉ À L\'OREILLE ✓'}; return; }
+  // On ne corrige que pendant l'intro de B (avant le swap des basses), 4 coups au plus
+  if (now > plan.tDrop - 2 * beat || (plan.earFix || 0) >= 4){ lockInfo = {t: now, txt: `ÉCART ${Math.round(lag * 1000)} ms`}; return; }
+  plan.earFix = (plan.earFix || 0) + 1;
+  n.nudge(lag, Math.max(0.25, Math.abs(lag) / 0.03));
+  lockInfo = {t: now, txt: `RECALAGE ${n.id} ${lag > 0 ? '+' : ''}${Math.round(lag * 1000)} ms`};
+}
 function autoTick(){
   autoSyncIdle(decks.A); autoSyncIdle(decks.B);
   if (waitFree && !waitFree.free.playing){ const w = waitFree; waitFree = null; if (auto) queueNext(w.cur, w.free); }
@@ -1862,6 +1916,7 @@ function autoTick(){
     if (!ev.armed && !plan.manual && ev.t - now < 0.3){ paramAt(ev.d, ev.key, ev.v, ev.t, ev.tc); ev.armed = true; }
     if (ev.armed && now >= ev.t){ const c = ev.key === 'xf' ? xfCtl : ev.d.ctl[ev.key]; if (c) c.set(ev.v, false); ev.done = true; }
   }
+  earCheck(plan, now);
   // (si A s'arrête avant le swap, B récupère tout de suite ses basses ; après le swap on laisse finir la queue de reverb)
   if (now >= plan.tEnd || !n.playing || (!o.playing && now > plan.T0 && now < plan.tDrop)) finishTransition();
 }
@@ -2339,6 +2394,7 @@ function preAlign(o, n, plan){
   return {lag, f};
 }
 function phaseLock(){
+  if (plan && plan.scheduled && EAR.node) return;   // pendant un mix, c'est l'oreille qui juge
   const now = ctx.currentTime; if (now - lastLock < 1) return; lastLock = now;
   const A = decks.A, B = decks.B;
   if (!A.playing || !B.playing || !A.item || !B.item || A.nudging || B.nudging) return;

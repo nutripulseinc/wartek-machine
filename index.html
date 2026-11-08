@@ -1738,12 +1738,13 @@ function paramAt(d, key, v, t, tc = 0.03){
 function schedule(d, key, v, t, tc){ plan.events.push({d, key, v, t, tc}); }
 
 function startTransition(dt){
+  const fix = preAlign(plan.o, plan.n, plan);   // calcul fait AVANT de lire l'horloge : il ne retarde pas le départ
+  if (fix){ plan.rate *= fix.f; plan.bStart += fix.lag * plan.rate; plan.preFix = fix; }
+  dt = (plan.oldStart - plan.o.pos()) / plan.o.rate;
   const {o, n} = plan, now = ctx.currentTime, T0 = now + Math.max(0.02, dt), beat = o.beatLen / o.rate, L = plan.Lp;
   // Si on est en retard sur K2, B démarre un peu plus loin dans son morceau : son K reste collé au K2 de A
   // Pré-calage : avant de lancer B, on compare ses kicks à ceux de A sur l'intro et autour de B1/B2.
   // Décalage → on déplace le départ de B ; écart de tempo → on corrige son pitch. Tout est réglé avant qu'on l'entende.
-  const fix = preAlign(o, n, plan);
-  if (fix){ plan.rate *= fix.f; plan.bStart += fix.lag * plan.rate; plan.preFix = fix; }
   const late0 = Math.max(0, 0.02 - dt) * plan.rate;
   const tDrop = now + (plan.P - o.pos()) / o.rate;
   plan.events = []; plan.T0 = T0; plan.tDrop = tDrop;
@@ -2017,6 +2018,7 @@ async function loadItem(i, deckId){
   try {
     if (!t.buffer) t.buffer = await decode(await t.file.arrayBuffer());
     if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
+      const sh = kickShift(t.buffer, t.firstBeat, 60 / t.bpm); t.firstBeat += sh; t.start += sh; t.kickFix = sh;
       if (t.markers && t.markers.kick != null){ t.firstBeat = t.start = t.markers.kick; } }
     d.load(t);
     d.ctl.lo.set(0); d.ctl.filt.set(0);
@@ -2203,22 +2205,64 @@ let lastDraw = 0;
 // Calage automatique : on compare les kicks réellement joués par les deux platines.
 // S'ils ne tombent pas ensemble, petit coup de pitch sur le son qui entre ; une fois calé, on ne touche plus.
 let lastLock = 0, lockInfo = null;
+// Attaques des kicks à 1 ms près, lues directement dans le son (basses filtrées < 150 Hz, front montant de l'énergie)
+function kickOnsets(buf){
+  const sr = buf.sampleRate, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+  const a = 1 - Math.exp(-2 * Math.PI * 150 / sr), hop = Math.round(sr / 1000), n = Math.floor(L.length / hop);
+  const env = new Float32Array(n); let y1 = 0, y2 = 0;
+  for (let k = 0, i = 0; k < n; k++){ let acc = 0; for (let j = 0; j < hop; j++, i++){ const x = (L[i] + R[i]) * 0.5; y1 += a * (x - y1); y2 += a * (y1 - y2); acc += y2 * y2; } env[k] = Math.sqrt(acc / hop); }
+  const on = new Float32Array(n);
+  for (let k = 3; k < n; k++){ const d = env[k] - Math.max(env[k - 2], env[k - 3]); on[k] = d > 0 ? d : 0; }
+  for (let k = n - 1; k >= 2; k--) on[k] = 0.5 * on[k] + 0.3 * on[k - 1] + 0.2 * on[k - 2];
+  return {env: on, rate: 1000};
+}
+const onsetAt = (t, sec) => { const h = null; if (!h) return t.env ? envAt(t, sec) : 0; const x = sec * h.rate, i = Math.floor(x), f = x - i, e = h.env; return i >= 0 && i + 1 < e.length ? e[i] * (1 - f) + e[i + 1] * f : 0; };
+// Mesure du décalage par corrélation : renvoie le retard du second son (s) ou null si pas fiable
+function xcorrLag(a, bx, L, step){
+  const N = a.length; let best = -1, bj = 0, sum = 0, aa = 0, bb = 0; const cs = new Float32Array(2 * L + 1);
+  for (let k = 0; k < N; k++) aa += a[k] * a[k];
+  for (let k = L; k < N + L; k++) bb += bx[k] * bx[k];
+  for (let j = -L; j <= L; j++){ let c = 0; for (let k = 0; k < N; k++) c += a[k] * bx[k + j + L]; cs[j + L] = c; sum += c; if (c > best){ best = c; bj = j; } }
+  const mean = sum / (2 * L + 1), norm = best / Math.sqrt(aa * bb + 1e-12);
+  if (best <= 0 || best < 1.25 * mean || norm < 0.2 || Math.abs(bj) >= L) return null;   // pas de vrai pic, ou pic au bord
+  let fr = 0; const y0 = cs[bj - 1 + L], y2 = cs[bj + 1 + L], den = y0 - 2 * best + y2; if (den < 0) fr = clamp(0.5 * (y0 - y2) / den, -0.5, 0.5);
+  return (bj + fr) * step;
+}
 const envAt = (t, sec) => { const x = sec * t.envRate, i = Math.floor(x), f = x - i, e = t.env; return i >= 0 && i + 1 < e.length ? e[i] * (1 - f) + e[i + 1] * f : 0; };
 // Décalage (s, temps réel) des kicks de B par rapport à ceux de A, sur une fenêtre de temps réel [t1, t2) après le départ
+// Position exacte des kicks : sur ~200 kicks du morceau, on mesure où démarre vraiment l'attaque (son filtré < 600 Hz : le claquement du kick, sans les charleys ; 50 % du pic)
+// et on recale toute la grille dessus (médiane → insensible aux kicks absents ou aux basses). K, K1, K2 tombent ainsi pile.
+function kickShift(buf, fb, beat){
+  const sr = buf.sampleRate, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+  const a = 1 - Math.exp(-2 * Math.PI * 600 / sr), nBeats = Math.floor((buf.duration - fb) / beat) - 1;
+  if (nBeats < 16) return 0;
+  const every = Math.max(1, Math.floor(nBeats / 200)), res = [], pk = [];
+  const ms = Math.round(sr / 1000), pre = 0.06, post = 0.06;
+  for (let b = 0; b < nBeats; b += every){
+    const tg = fb + b * beat, s0 = Math.floor((tg - pre - 0.08) * sr); if (s0 < 0) continue;
+    const s1 = Math.floor((tg + post) * sr); let y1 = 0, y2 = 0, acc = 0, c = 0; const env = [];
+    for (let i = s0; i < s1 && i < L.length; i++){ const x = (L[i] + R[i]) * 0.5; y1 += a * (x - y1); y2 += a * (y1 - y2); acc += y2 * y2; if (++c === ms){ env.push(Math.sqrt(acc / ms)); acc = 0; c = 0; } }
+    const o = 80, w0 = o, w1 = Math.min(env.length - 1, o + 120);   // fenêtre tg-60 ms .. tg+60 ms
+    let m = 0, mi = -1; for (let k = w0; k <= w1; k++) if (env[k] > m){ m = env[k]; mi = k; }
+    if (mi < 0) continue;
+    const floor = Math.min(...env.slice(w0 - 20, w0 + 5)); if (m < 2.5 * floor + 1e-6) continue;   // pas de vrai kick ici
+    let k = mi; while (k > w0 - 20 && env[k] > floor + 0.5 * (m - floor)) k--;
+    res.push((k + 0.5 - o - 60) / 1000); pk.push(m);
+  }
+  if (res.length < 12) return 0;
+  const mp = [...pk].sort((x, y) => x - y)[Math.floor(pk.length / 2)];
+  const good = res.filter((v, i) => pk[i] >= 0.5 * mp).sort((x, y) => x - y);
+  if (good.length < 8) return 0;
+  const med = good[Math.floor(good.length / 2)];
+  return Math.abs(med) <= 0.04 ? med : 0;
+}
 function kickLag(o, n, aStart, bStart, rA, rB, t1, t2, beat){
-  if (!o.item?.env || !n.item?.env) return null;
-  const step = 0.002, N = Math.floor((t2 - t1) / step), L = Math.floor(0.2 * beat / step);   // jamais plus de 1/5 de temps : sinon on risque de caler un kick sur une basse if (N < 60) return null;
+  if (!o.item || !n.item) return null;
+  const step = 0.001, N = Math.floor((t2 - t1) / step), L = Math.floor(0.2 * beat / step); if (N < 200) return null;   // jamais plus de 1/5 de temps
   const a = new Float32Array(N), bx = new Float32Array(N + 2 * L);
-  for (let k = 0; k < N; k++) a[k] = envAt(o.item, aStart + (t1 + k * step) * rA);
-  for (let k = -L; k < N + L; k++) bx[k + L] = envAt(n.item, bStart + (t1 + k * step) * rB);
-  let best = -1, bj = 0, sum = 0;
-  for (let j = -L; j <= L; j++){ let c = 0; for (let k = 0; k < N; k++) c += a[k] * bx[k + j + L]; sum += c; if (c > best){ best = c; bj = j; } }
-  const mean = sum / (2 * L + 1);
-  if (best <= 0 || best < 1.5 * mean) return null;
-  // affinage sous l'échantillon (parabole)
-  const cAt = j => { let c = 0; for (let k = 0; k < N; k++) c += a[k] * bx[k + j + L]; return c; };
-  let fr = 0; if (Math.abs(bj) < L){ const y0 = cAt(bj - 1), y2 = cAt(bj + 1), den = y0 - 2 * best + y2; if (den < 0) fr = clamp(0.5 * (y0 - y2) / den, -0.5, 0.5); }
-  return (bj + fr) * step;
+  for (let k = 0; k < N; k++) a[k] = onsetAt(o.item, aStart + (t1 + k * step) * rA);
+  for (let k = -L; k < N + L; k++) bx[k + L] = onsetAt(n.item, bStart + (t1 + k * step) * rB);
+  return xcorrLag(a, bx, L, step);
 }
 function preAlign(o, n, plan){
   if (!plan.synced) return null;
@@ -2240,20 +2284,18 @@ function preAlign(o, n, plan){
 function phaseLock(){
   const now = ctx.currentTime; if (now - lastLock < 1) return; lastLock = now;
   const A = decks.A, B = decks.B;
-  if (!A.playing || !B.playing || !A.item?.env || !B.item?.env || A.nudging || B.nudging) return;
+  if (!A.playing || !B.playing || !A.item || !B.item || A.nudging || B.nudging) return;
   const since = now - Math.max(A.t0, B.t0, A.nudgeEnd || 0, B.nudgeEnd || 0);   // fenêtre sans coup de pitch
   if (since < 0.6) return;
   if (Math.abs(A.bpm * A.rate - B.bpm * B.rate) > 0.08) return;
   const master = plan && plan.scheduled ? plan.o : (A.t0 <= B.t0 ? A : B), slave = other(master);
-  const beat = 60 / (master.bpm * master.rate), W = Math.min(8 * beat, since - 0.05), step = 0.002;
-  const N = Math.floor(W / step), L = Math.floor(0.2 * beat / step); if (N < 60) return;
+  const beat = 60 / (master.bpm * master.rate), W = Math.min(8 * beat, since - 0.05), step = 0.001;
+  const N = Math.floor(W / step), L = Math.floor(0.2 * beat / step); if (N < 200) return;
   const pm = master.pos(), ps = slave.pos(), a = new Float32Array(N), bx = new Float32Array(N + 2 * L);
-  for (let k = 0; k < N; k++){ const back = (N - k) * step; a[k] = envAt(master.item, pm - back * master.rate); }
-  for (let k = -L; k < N + L; k++){ const back = (N - k) * step; bx[k + L] = envAt(slave.item, ps - back * slave.rate); }
-  let best = -1, bj = 0, sum = 0;
-  for (let j = -L; j <= L; j++){ let c = 0; for (let k = 0; k < N; k++) c += a[k] * bx[k + j + L]; sum += c; if (c > best){ best = c; bj = j; } }
-  const mean = sum / (2 * L + 1); if (best < 1.6 * mean || best <= 0) return;   // pas assez de kicks nets pour juger
-  const late = bj * step;   // > 0 : le son qui entre est en retard
+  for (let k = 0; k < N; k++){ const back = (N - k) * step; a[k] = onsetAt(master.item, pm - back * master.rate); }
+  for (let k = -L; k < N + L; k++){ const back = (N - k) * step; bx[k + L] = onsetAt(slave.item, ps - back * slave.rate); }
+  const late = xcorrLag(a, bx, L, step);   // > 0 : le son qui entre est en retard
+  if (late == null){ lockInfo = {t: now, txt: 'CALAGE ?'}; return; }
   if (Math.abs(late) < 0.003){ lockInfo = {t: now, txt: 'CALÉ ✓'}; return; }
   // Si le son se décale toujours dans le même sens, son tempo n'est pas tout à fait le bon : on corrige aussi le pitch de base
   let f = 1; const lc = slave.lastCorr;

@@ -607,19 +607,20 @@ async function analyzeBpm(buffer){
   for (let i = 0; i < n; i++){ const a = Math.max(0, i - half), b = Math.min(n, i + half + 1); kick[i] = Math.max(0, lowOn[i] - (cl[b] - cl[a]) / (b - a)) + 0.25 * on[i]; }
 
   // 2. tempo approximatif
-  const lagMin = Math.floor(60 * fps / 190), lagMax = Math.ceil(60 * fps / 70);
+  const lagMin = Math.floor(60 * fps / 250), lagMax = Math.ceil(60 * fps / 110);
   const ac = new Float32Array(lagMax * 4 + 4);
   for (let L = lagMin; L < ac.length && L < n; L++){ let a = 0; for (let i = 0; i + L < n; i++) a += on[i] * on[i + L]; ac[L] = a / (n - L); }
   const acAt = x => { const i = Math.floor(x), f = x - i; return i + 1 < ac.length ? ac[i] * (1 - f) + ac[i + 1] * f : 0; };
   let best = -1, bestL = lagMin;
   for (let L = lagMin; L <= lagMax; L++){
-    const bpm = 60 * fps / L, w = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 125) / 0.55, 2));
+    const bpm = 60 * fps / L, w = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 165) / 0.6, 2));
     const sc = (ac[L] + 0.5 * acAt(2 * L) + 0.25 * acAt(4 * L)) * w;
     if (sc > best){ best = sc; bestL = L; }
   }
   const y0 = ac[bestL - 1], y1 = ac[bestL], y2 = ac[bestL + 1], den = y0 - 2 * y1 + y2;
   let P = bestL + (den < 0 ? 0.5 * (y0 - y2) / den : 0);
-  while (60 * fps / P < 85) P /= 2; while (60 * fps / P >= 175) P *= 2;
+  // musiques rapides : tempo ramené entre 120 et 240 BPM (Hardstyle ~150, Hardcore ~175, Frenchcore ~200)
+  while (60 * fps / P < 120) P /= 2; while (60 * fps / P >= 240) P *= 2;
 
   // 3. phase grossière puis régression sur les temps réels
   let bs = -1, ph = 0;
@@ -638,7 +639,7 @@ async function analyzeBpm(buffer){
       pts.push([k, t, bv]);
     }
     if (pts.length < 8) return;
-    const vals = pts.map(p => p[2]).sort((x, y) => x - y), floor = vals[Math.floor(vals.length * 0.3)];
+    const vals = pts.map(p => p[2]).sort((x, y) => x - y), floor = Math.max(vals[Math.floor(vals.length * 0.3)], 0.35 * vals[Math.floor(vals.length * 0.8)]);
     for (const [k, t, w] of pts){ if (w < floor) continue; S += w; Sk += w * k; St += w * t; Skk += w * k * k; Skt += w * k * t; }
     const D = S * Skk - Sk * Sk; if (D <= 0) return;
     b0 = (S * Skt - Sk * St) / D; a0 = (St - b0 * Sk) / S;
@@ -1271,7 +1272,7 @@ xfCtl.set(50, 'force');
       Si B coupe ses basses pour un break / une montée, A est coupé au même moment. */
 let auto = false, plan = null, transBeats = 32, waitFree = null, endOfList = false;
 // Un effet différent à chaque mix, comme un DJ
-const STYLES = [['clean', 'CFX seul'], ['echo', 'Écho out'], ['flanger', 'Flanger'], ['crush', 'Crush']];
+const STYLES = [['clean', 'CFX']];
 let mixCount = Math.floor(Math.random() * STYLES.length);
 function fxAt(d, v, t, tc = 0.05){
   const a = v.amt || 0, nm = v.name, set = (g, x) => g.gain.setTargetAtTime(x, t, tc);
@@ -1326,30 +1327,33 @@ function makePlan(o, n){
   const ob = o.beatLen, nb = n.beatLen, pos = o.pos(), lead = 1.2 * o.rate;
   const E = endOfMusic(o.item);
   const nStart = n.item.start ?? n.firstBeat;
-  let I = Math.max(0, Math.round((sn.drop - nStart) / nb / 4) * 4), bStart = nStart;
-  if (I > 128){ bStart = sn.drop - 128 * nb; I = 128; }
-  if (!synced && I > 16){ bStart = sn.drop - 16 * nb; I = 16; }
   const phrase = 32 * ob;
   const grid = (t, step, up) => o.firstBeat + (up ? Math.ceil((t - o.firstBeat) / step - 1e-6) : Math.floor((t - o.firstBeat) / step + 1e-6)) * step;
-  // P = 1er temps d'une phrase de 32 temps de A, là où la basse de A s'arrête (marqueur FIN), jamais après la fin de A.
-  // B est lancé sur son KICK exactement I temps avant : sa 1re BASSE tombe pile sur P.
-  // Comme I est un nombre entier de mesures, les 8, 16 et 32 temps des deux sons restent alignés.
-  const last = E - 4 * ob;
-  let P = grid(Math.min(so.outro, last), phrase, false);
-  if (P - I * ob < pos + lead){
-    P = grid(pos + lead + I * ob, phrase, true);
-    if (P > last){
-      // Pas assez de place pour toute l'intro de B : on la raccourcit par blocs de 16 temps,
-      // B part plus loin dans son intro mais sa basse tombe toujours sur un début de phrase de A
-      P = grid(pos + lead + 16 * ob, phrase, true);
-      if (P > last) P = grid(pos + lead + 16 * ob, 16 * ob, true);
-      if (P > last) P = grid(pos + lead, 4 * ob, true);
-      const room = Math.floor((P - pos - lead) / ob / 16) * 16, I2 = Math.max(0, Math.min(I, room));
-      bStart = sn.drop - I2 * nb; I = I2;
-    }
+  // Intro de B jusqu'à l'arrivée de sa basse / de son kick plein (en temps)
+  const introB = Math.max(0, Math.round((sn.drop - nStart) / nb));
+  // Durée de B en arrière-plan (basses coupées) avant le swap : 32 temps (mix long), 16 (court) ou 0 (swap direct)
+  const bgFor = max => {
+    if (!synced) return Math.min(16, max);
+    if (introB === 0) return max >= 32 ? 32 : max >= 16 ? 16 : 0;   // kick dès le début : 32 temps d'arrière-plan
+    const fit = Math.min(introB, max);
+    return fit >= 32 ? Math.floor(fit / 32) * 32 : fit >= 16 ? 16 : 0;
+  };
+  const limit = Math.min(so.outro, E - 4 * ob);       // le swap doit avoir lieu avant la fin des basses de A
+  let aStart, I;
+  // 1er choix : le dernier début de bloc de 32 temps de A qui laisse toute l'intro de B avant la fin de A
+  I = bgFor(128);
+  aStart = grid(limit - I * ob, phrase, false);
+  if (aStart < pos + lead){
+    // Trop tard : prochain bloc de 32 temps, et arrière-plan raccourci pour tenir avant la fin
+    aStart = grid(pos + lead, phrase, true);
+    if (aStart > limit) aStart = grid(pos + lead, 16 * ob, true);
+    if (aStart > E - 4 * ob) aStart = grid(pos + lead, 4 * ob, true);
+    I = bgFor(Math.max(0, Math.floor((limit - aStart) / ob)));
   }
-  const aStart = P - I * ob;
-  const eB = barEnergy(n.item), dBar = sn.dropBar;
+  const P = aStart + I * ob;
+  // B part sur son 1er kick (kick dès le début) ou I temps avant sa basse : son swap tombe pile sur P
+  const bStart = introB === 0 ? nStart : sn.drop - I * nb;
+  const eB = barEnergy(n.item), dBar = Math.max(0, Math.round((bStart + I * nb - n.firstBeat) / (4 * nb)));
   const refE = eB.slice(dBar, dBar + 4).reduce((a, b) => a + b, 0) / Math.max(1, Math.min(4, eB.length - dBar));
   const postBars = clamp(Math.floor((E - P) / (4 * ob)), 1, 8);
   // (si A finit avant la basse de B, A s'éteint simplement à sa fin)
@@ -1402,7 +1406,12 @@ function startTransition(dt){
   // B prêt avant d'entrer : basses coupées, médiums -9 dB, aigus -5 dB, volume bas
   const pre = [['lo', -26], ['mid', -9], ['hi', -5], ['filt', 0], ['vol', 42]];
   pre.forEach(([k, v]) => { paramAt(n, k, v, now, 0.01); n.ctl[k].set(v, false); });
-  n.playAt(T0, plan.bStart);
+  // Anti « pop » : B démarre 8 ms avant son kick avec un micro fondu, le kick reste pile sur le temps
+  const preroll = Math.min(0.008, plan.bStart);
+  n.input.gain.cancelScheduledValues(0); n.input.gain.setValueAtTime(0, T0 - preroll / plan.rate);
+  n.input.gain.linearRampToValueAtTime(1, T0 - preroll / plan.rate + 0.006);
+  n.playAt(T0 - preroll / plan.rate, plan.bStart - preroll);
+  n.t0 = T0 - preroll / plan.rate;
   schedule(null, 'xf', 50, T0, 0.05);
   // Montée douce, temps par temps
   for (let i = 1; i < L; i++){
@@ -1410,16 +1419,19 @@ function startTransition(dt){
     schedule(n, 'vol', Math.round(42 + 46 * f), t, 0.06);
     if (i % 4 === 0){ schedule(n, 'mid', Math.round(-9 + 8 * f), t, 0.08); schedule(n, 'hi', Math.round(-5 + 5 * f), t, 0.08); schedule(o, 'hi', Math.round(-4 * f), t, 0.08); }
   }
-  // Le drop : basses échangées pile sur le temps
-  schedule(n, 'lo', 0, tDrop, 0.006); schedule(o, 'lo', -14, tDrop, 0.006);
+  // Bass swap : sur le temps fort, basses de A coupées net et basses de B libérées, instantanément
+  schedule(n, 'lo', 0, tDrop, 0.002); schedule(o, 'lo', -26, tDrop, 0.002);
   schedule(n, 'vol', 100, tDrop, 0.02); schedule(n, 'mid', 0, tDrop, 0.02); schedule(n, 'hi', 0, tDrop, 0.02);
   const bar = 4 * beat, st = plan.style[0], pre8 = Math.max(now + 0.05, tDrop - 8 * beat), n8 = Math.round((tDrop - pre8) / beat);
   // Coup de CFX sur A à chaque transition, sur ses 8 derniers temps : un mix sur deux dans les aigus (passe-haut),
   // l'autre dans les graves (passe-bas)
-  const cfx = mixCount % 2 === 0 ? 1 : -1; plan.cfx = cfx > 0 ? 'CFX aigus' : 'CFX graves';
+  // CFX léger pour habiller : long (16 temps) sur un mix long, court (4 temps) sur un mix court
+  const cfx = mixCount % 2 === 0 ? 1 : -1, longMix = L >= 32, span = longMix ? 16 : 4;
+  plan.cfx = `CFX ${longMix ? 'long' : 'court'} · ${cfx > 0 ? 'aigus' : 'graves'}`;
   mixCount++;
-  for (let i = 1; i <= n8; i++) schedule(o, 'filt', Math.round(cfx * (cfx > 0 ? 50 : 45) * Math.pow(i / n8, 1.5)), pre8 + i * beat, 0.07);
-  schedule(o, 'filt', cfx > 0 ? 60 : -60, tDrop + beat, 0.15);
+  const c0 = Math.max(now + 0.05, tDrop - span * beat), cn = Math.round((tDrop - c0) / beat);
+  for (let i = 1; i <= cn; i++) schedule(o, 'filt', Math.round(cfx * (cfx > 0 ? 45 : 40) * Math.pow(i / cn, 1.4)), c0 + i * beat, longMix ? 0.08 : 0.04);
+  schedule(o, 'filt', cfx > 0 ? 60 : -60, tDrop + beat, 0.12);
   if (st === 'flanger'){
     for (let i = 0; i <= n8; i += 2) schedule(o, 'fx', {name: 'flanger', amt: 0.1 + 0.55 * i / Math.max(1, n8)}, pre8 + i * beat, 0.25);
     schedule(o, 'fx', {name: 'flanger', amt: 0.3}, tDrop + 2 * beat, 0.4);
@@ -1779,9 +1791,9 @@ function updateLcd(){
   const cur = Object.values(decks).find(d => d.playing && d.t0 <= ctx.currentTime);
   if (plan){
     const now = ctx.currentTime, id = `${plan.o.id}→${plan.n.id}`, beat = plan.o.beatLen / plan.o.rate;
-    if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = `Départ sur le 1er temps après 32 temps · ${plan.style[1]}`; }
-    else if (now < plan.tDrop){ a = `${plan.n.id} ENTRE · DROP DANS ${Math.ceil((plan.tDrop - now) / beat)} T`; b = `Effet : ${plan.style[1]} · basses ${plan.n.id} coupées`; }
-    else if (now < plan.tDrop + 4 * beat){ a = `DROP ! BASSES → ${plan.n.id}`; b = `Basses ${plan.o.id} -14 dB, les deux restent mixés`; }
+    if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; }
+    else if (now < plan.tDrop){ a = `${plan.n.id} ENTRE · SWAP DANS ${Math.ceil((plan.tDrop - now) / beat)} T`; b = `${plan.cfx || 'CFX'} · basses ${plan.n.id} coupées`; }
+    else if (now < plan.tDrop + 4 * beat){ a = `BASS SWAP → ${plan.n.id}`; b = `Basses ${plan.o.id} coupées net`; }
     else if (plan.cutBar){ a = `MIX ${id} · BREAK DE ${plan.n.id} DANS ${Math.max(0, Math.ceil((plan.tEnd - now) / beat))} T`; b = `${plan.o.id} sera coupé sur le break`; }
     else if (now < plan.tFade){ a = `MIX ${id} · LES DEUX ENSEMBLE`; b = `${plan.o.id} s'efface dans ${Math.ceil((plan.tFade - now) / beat)} temps`; }
     else if (plan.style[0] === 'echo'){ a = `${plan.o.id} ÉCHO OUT`; b = 'Les répétitions de A s\'éteignent'; }

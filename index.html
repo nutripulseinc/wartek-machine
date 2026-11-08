@@ -1842,7 +1842,10 @@ function settleTempo(d){
 }
 const DIAG = [];
 function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struct || {};
-  return {nom: t.name, bpm: t.bpm, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar, marqueurs: t.markers || {}}; }
+  let e = []; try { e = barEnergy(t); } catch(_){}
+  const mx = Math.max(1e-9, ...e), around = b => b == null ? null : e.slice(Math.max(0, b - 4), b + 4).map(v => Math.round(100 * v / mx)).join(' ');
+  return {nom: t.name, bpm: t.bpm, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar,
+    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
     grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
@@ -2414,12 +2417,13 @@ function kickFit(buf, fb, beat){
     for (let s0 = 0; s0 < nBeats; s0 += 32){ const w = P.filter(p => p.b >= s0 && p.b < s0 + 64); if (w.length < 24) continue; const fw = robust(w); if (fw && fw.rms < 0.004) Ts.push(fw.T); }
     if (Ts.length >= 2){
       Ts.sort((x, y) => x - y); const Tm = Ts[Math.floor(Ts.length / 2)];
-      if (Math.abs(Tm / f.T - 1) > 0.0002 || f.rms > 0.004){
-        // calage du temps 0 sur la partie la plus longue (médiane des écarts à la grille), le reste est rattrapé par la grille locale
-        const res = P.map(p => { let r = (p.t - fb) / Tm - p.b; return (r - Math.round(r)) * Tm; }).sort((x, y) => x - y);
-        const med = res[Math.floor(res.length / 2)], mad = res.map(r => Math.abs(r - med)).sort((x, y) => x - y)[Math.floor(res.length / 2)];
-        f = {c: fb + med, T: Tm, rms: mad};
-      }
+      // calage du temps 0 sur la partie la plus longue (médiane des écarts à la grille), le reste est rattrapé par la grille locale
+      const res = P.map(p => { let r = (p.t - fb) / Tm - p.b; return (r - Math.round(r)) * Tm; }).sort((x, y) => x - y);
+      const med = res[Math.floor(res.length / 2)];
+      // on garde la grille (globale ou par tranches) qui colle le mieux à l'ensemble des kicks du morceau
+      const E = (c, T) => { const r = P.map(p => { let x = (p.t - c) / T; return Math.abs(x - Math.round(x)) * T; }).sort((x, y) => x - y); return r[Math.floor(r.length / 2)]; };
+      const eW = E(fb + med, Tm), eG = E(f.c, f.T);
+      if (eW < 0.8 * eG){ f = {c: fb + med, T: Tm, rms: eW}; bestT.win = true; }
     } }
   if (Math.abs(f.T / beat - 1) > 0.01) return null;
   while (f.c - fb > 0.5 * f.T) f = {...f, c: f.c - f.T}; while (fb - f.c > 0.5 * f.T) f = {...f, c: f.c + f.T};
@@ -2427,7 +2431,7 @@ function kickFit(buf, fb, beat){
   // BPM rond : les morceaux sont produits à tempo fixe et rond (200, 150, 174,5…). Un 199,962 est une erreur de mesure
   // (attaques un peu différentes d'une partie à l'autre) qui ferait glisser les deux sons pendant le mix.
   let bpm = 60 / f.T;
-  const refit = T => { const res = bestT.pts.map(p => { let r = (p.t - f.c) / T - Math.round((p.t - f.c) / T); return r * T; }).sort((x, y) => x - y);
+  const refit = T => { if (!bestT.win) return fit(g, T); const res = bestT.pts.map(p => { let r = (p.t - f.c) / T - Math.round((p.t - f.c) / T); return r * T; }).sort((x, y) => x - y);
     const med = res[Math.floor(res.length / 2)]; return {c: f.c + med, T, rms: res.map(r => Math.abs(r - med)).sort((x, y) => x - y)[Math.floor(res.length / 2)]}; };
   if (Math.abs(bpm - Math.round(bpm)) <= 0.08){ bpm = Math.round(bpm); f = refit(60 / bpm); }
   else if (Math.abs(bpm * 2 - Math.round(bpm * 2)) <= 0.08){ bpm = Math.round(bpm * 2) / 2; f = refit(60 / bpm); }

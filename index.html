@@ -1324,6 +1324,11 @@ function fxAt(d, v, t, tc = 0.05){
   set(d.dry, nm === 'flanger' ? 1 - 0.4 * a : nm === 'crush' ? 1 - 0.85 * a : 1);
   if (nm === 'flanger'){ d.flL.o.frequency.setTargetAtTime(0.18, t, 0.1); d.flFb.gain.setTargetAtTime(0.75, t, 0.1); }
   if (nm === 'echo'){ d.ecFb.gain.setTargetAtTime(v.fb ?? 0.6, t, 0.02); d.ecD.delayTime.setTargetAtTime((v.rate ?? 0.75) * 60 / (d.bpm * d.rate), t, 0.01); }
+  if (nm === 'reverb'){
+    if (!d.rvOn){ d.makeIR(3.5); d.post.connect(d.conv); d.rvOn = true; }
+    d.rvTone.frequency.setTargetAtTime(7000, t, 0.1);
+    set(d.rvWet, a * 0.9);
+  }
 }
 function restoreDeck(d){
   const now = ctx.currentTime;
@@ -1411,12 +1416,21 @@ function makePlan(o, n){
   const bStart = introB === 0 ? nStart : sn.drop - I * nb;
   const eB = barEnergy(n.item), dBar = Math.max(0, Math.round((bStart + I * nb - n.firstBeat) / (4 * nb)));
   const refE = eB.slice(dBar, dBar + 4).reduce((a, b) => a + b, 0) / Math.max(1, Math.min(4, eB.length - dBar));
-  const postBars = clamp(Math.floor((E - P) / (4 * ob)), 1, 8);
-  // (si A finit avant la basse de B, A s'éteint simplement à sa fin)
+  // Point de coupe C du son sortant (en mesures après le swap) :
+  // - si les basses du son qui entre s'arrêtent (break / montée) : A est coupé là ;
+  // - sinon A reste avec B jusqu'à la fin de sa basse (F), 16 mesures au plus, calé par blocs de 4 mesures.
+  const roomBars = Math.max(1, Math.floor((E - P) / (4 * ob)));
+  const postBars = clamp(roomBars, 1, 16);
   let cutBar = null;
   for (let k = 1; k <= postBars && dBar + k < eB.length; k++){ if (eB[dBar + k] < 0.5 * refE){ cutBar = k; break; } }
-  return {o, n, rate: r, synced, useB2, why, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
-          totalBeats: I + (cutBar || postBars) * 4, style: STYLES[mixCount % STYLES.length], scheduled: false};
+  let cutBars = cutBar;
+  if (!cutBars){
+    const toF = Math.round((so.outro - P) / (4 * ob));
+    cutBars = clamp(toF >= 4 ? Math.round(toF / 4) * 4 : 4, 4, 16);
+    cutBars = Math.min(cutBars, roomBars);
+  }
+  return {o, n, rate: r, synced, useB2, why, cutBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+          totalBeats: I + cutBars * 4 + 8, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
 
@@ -1496,31 +1510,15 @@ function startTransition(dt){
     for (let i = 0; i <= n8; i += 2) schedule(o, 'fx', {name: 'crush', amt: 0.1 + 0.5 * i / Math.max(1, n8)}, pre8 + i * beat, 0.15);
     schedule(o, 'fx', {name: 'none'}, tDrop, 0.35);
   }
-  const echoOut = (t0) => {
-    schedule(o, 'fx', {name: 'echo', amt: 0.85, rate: 0.75, fb: 0.62}, t0 - beat, 0.02);
-    schedule(o, 'input', 0, t0, 0.005);
-    for (let i = 1; i <= 8; i++) schedule(o, 'vol', Math.round(100 * (1 - i / 8)), t0 + i * beat, 0.1);
-    return t0 + 8 * beat + 0.1;
-  };
-  if (plan.cutBar){
-    // B coupe pour un break : A coupé au même moment
-    const tCut = tDrop + plan.cutBar * bar;
-    if (st === 'echo') plan.tEnd = echoOut(tCut);
-    else { schedule(o, 'vol', 0, tCut, 0.015); plan.tEnd = tCut + 0.1; }
-  } else if (st === 'echo'){
-    const hold = Math.max(1, Math.floor(plan.postBars / 2));
-    plan.tFade = tDrop + hold * bar; plan.tEnd = echoOut(plan.tFade);
-  } else {
-    // A reste mélangé, puis s'efface temps par temps
-    const hold = Math.max(1, Math.min(4, Math.floor(plan.postBars / 2))), fadeBeats = (plan.postBars - hold) * 4;
-    const tFade = tDrop + hold * bar;
-    for (let i = 1; i <= fadeBeats; i++){
-      const f = i / fadeBeats, t = tFade + i * beat;
-      schedule(o, 'vol', Math.round(100 * (1 - f) * (1 - f * 0.3)), t, 0.06);
-      if (i % 4 === 0) schedule(o, 'hi', Math.round(-4 - 10 * f), t, 0.08);
-    }
-    plan.tFade = tFade; plan.tEnd = tFade + fadeBeats * beat + 0.1;
-  }
+  // Sortie de A au point C : léger fondu avant, reverb qui monte, puis on coupe l'arrivée du son :
+  // il ne reste que la queue de reverb qui s'éteint sur 2 mesures (sur un break de B : plus court)
+  const tCut = tDrop + plan.cutBars * bar, onBreak = !!plan.cutBar, tail = onBreak ? 4 : 8;
+  if (!onBreak) for (let i = 1; i <= 8; i++) schedule(o, 'vol', Math.round(100 - 22 * i / 8), tCut - (8 - i) * beat, 0.08);
+  schedule(o, 'fx', {name: 'reverb', amt: 0.35}, tCut - (onBreak ? beat : 4 * beat), 0.3);
+  schedule(o, 'fx', {name: 'reverb', amt: 0.85}, tCut - beat, 0.15);
+  schedule(o, 'input', 0, tCut, 0.01);
+  for (let i = 1; i <= tail; i++) schedule(o, 'vol', Math.round(78 * (1 - i / tail)), tCut + i * beat, 0.25);
+  plan.tFade = tCut; plan.tEnd = tCut + tail * beat + 0.2;
   plan.events.sort((a, b) => a.t - b.t);
   plan.scheduled = true;
 }
@@ -1556,7 +1554,8 @@ function autoTick(){
     if (!ev.armed && !plan.manual && ev.t - now < 0.3){ paramAt(ev.d, ev.key, ev.v, ev.t, ev.tc); ev.armed = true; }
     if (ev.armed && now >= ev.t){ const c = ev.key === 'xf' ? xfCtl : ev.d.ctl[ev.key]; if (c) c.set(ev.v, false); ev.done = true; }
   }
-  if (now >= plan.tEnd || !n.playing || (!o.playing && now > plan.T0)) finishTransition();
+  // (si A s'arrête avant le swap, B récupère tout de suite ses basses ; après le swap on laisse finir la queue de reverb)
+  if (now >= plan.tEnd || !n.playing || (!o.playing && now > plan.T0 && now < plan.tDrop)) finishTransition();
 }
 
 function nextIndexAfter(item){ const i = lib.indexOf(item); return i >= 0 && i + 1 < lib.length ? i + 1 : -1; }
@@ -1744,7 +1743,7 @@ function drawZoom(d){
   g.globalAlpha = 1;
   const st = d.item && d.item.struct;
   const k2 = plan && plan.o === d ? plan.oldStart : null;
-  if (st) [[d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'FIN'], [k2, '#ff4fd8', 'K2']].filter(x => x[0] != null).forEach(([tm, col, lb]) => {
+  if (st) [[d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'FIN'], [k2, '#ff4fd8', 'K2'], [plan && plan.o === d ? plan.cut : null, '#ffb13d', 'COUPE']].filter(x => x[0] != null).forEach(([tm, col, lb]) => {
     const x = (tm - t0) * pps; if (x < 0 || x > W) return;
     g.fillStyle = col; g.fillRect(x - u, top, 2 * u, h);
     g.font = `${Math.round(11 * u)}px ${LCD_FONT}`; g.textBaseline = 'bottom'; g.fillText(lb, x + 3 * u, top + h);
@@ -1802,6 +1801,9 @@ function drawOver(d){
     g.fillStyle = '#ff4fd8'; g.fillRect(Math.round(xk - u), 0, 2 * u, H);
     g.font = `${Math.round(H * 0.16)}px ${LCD_FONT}`; g.textBaseline = 'top';
     g.fillRect(xk, H * 0.62, H * 0.24, H * 0.18); g.fillStyle = '#031216'; g.fillText('K2', xk + H * 0.02, H * 0.63);
+    const xc = plan.cut / d.duration * W;
+    g.fillStyle = '#ffb13d'; g.fillRect(Math.round(xc - u), 0, 2 * u, H);
+    g.fillRect(xc, H * 0.62, H * 0.16, H * 0.18); g.fillStyle = '#031216'; g.fillText('C', xc + H * 0.03, H * 0.63);
   }
   const px = d.duration ? d.pos() / d.duration * W : 0;
   g.fillStyle = 'rgba(5,10,16,.45)'; g.fillRect(0, 0, px, H);
@@ -1856,10 +1858,8 @@ function updateLcd(){
     if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = plan.useB2 ? `K de ${plan.n.id} sur K2 de ${plan.o.id} (${plan.Lp} temps) → B1 sur B2` : plan.why ? `${plan.why} : départ sur un bloc de 32` : `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; }
     else if (now < plan.tDrop){ a = `${plan.n.id} ENTRE · SWAP DANS ${Math.ceil((plan.tDrop - now) / beat)} T`; b = `${plan.cfx || 'CFX'} · basses ${plan.n.id} coupées`; }
     else if (now < plan.tDrop + 4 * beat){ a = `BASS SWAP → ${plan.n.id}`; b = `Basses ${plan.o.id} coupées net`; }
-    else if (plan.cutBar){ a = `MIX ${id} · BREAK DE ${plan.n.id} DANS ${Math.max(0, Math.ceil((plan.tEnd - now) / beat))} T`; b = `${plan.o.id} sera coupé sur le break`; }
-    else if (now < plan.tFade){ a = `MIX ${id} · LES DEUX ENSEMBLE`; b = `${plan.o.id} s'efface dans ${Math.ceil((plan.tFade - now) / beat)} temps`; }
-    else if (plan.style[0] === 'echo'){ a = `${plan.o.id} ÉCHO OUT`; b = 'Les répétitions de A s\'éteignent'; }
-    else { a = `${plan.o.id} S'EFFACE ${Math.round(clamp((now - plan.tFade) / (plan.tEnd - plan.tFade), 0, 1) * 100)}%`; b = 'Fondu temps par temps'; }
+    else if (now < plan.tFade){ a = `MIX ${id} · LES DEUX ENSEMBLE`; b = `${plan.cutBar ? 'Break de ' + plan.n.id + ' : ' : ''}coupe de ${plan.o.id} (C) dans ${Math.ceil((plan.tFade - now) / beat)} temps`; }
+    else { a = `${plan.o.id} REVERB OUT`; b = 'La queue de reverb s\'éteint'; }
     if (!plan.synced) b = 'Tempos trop éloignés : mix court';
     if (plan.manual) b = 'À toi de finir le passage';
   } else if (!auto){ a = 'SMART MIX OFF'; b = cur ? `En cours : ${cur.item.name}` : 'Lance un son, puis SMART MIX'; }

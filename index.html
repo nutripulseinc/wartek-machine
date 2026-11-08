@@ -538,7 +538,7 @@ function setMarker(d, kind){
     t.markers[kind] = t.firstBeat + b * bar;
     msg = kind === 'bass' ? `1re BASSE posée mesure ${b + 1} (${b * 4} temps après le KICK)` : `FIN de basse posée mesure ${b + 1}`;
   }
-  t.struct = null; t.barE = null; structureOf(t); d.overDirty = true;
+  t.struct = null; t.barE = null; t.barR = null; structureOf(t); d.overDirty = true;
   if (t.id) saveTrack(t);
   if (plan && !plan.scheduled) replanIfNeeded();
   toast(msg, 3400);
@@ -684,26 +684,41 @@ async function analyzeBpm(buffer){
   while (fb - barS >= -0.02) fb -= barS;
   if (fb < 0) fb += barS;
   // La grille (mesures, phrases de 32 temps) démarre sur la 1re vraie frappe
-  return {bpm: Math.round(bpm * 100) / 100, firstBeat: start, start};
+  return {bpm: Math.round(bpm * 100) / 100, firstBeat: start, start, env: kick, envRate: fps};
 }
 
 // Drop = montée d'énergie dans les basses ; sortie = chute d'énergie vers la fin. Calés sur des blocs de 4 mesures.
+// Énergie globale (RMS) mesure par mesure
+function barRms(t){
+  if (t.barR) return t.barR;
+  const bar = 240 / t.bpm, nb = Math.floor((t.buffer.duration - t.firstBeat) / bar), r = t.peaks.rms, e = [];
+  for (let b = 0; b < nb; b++){ const s0 = Math.floor((t.firstBeat + b * bar) * RES), s1 = Math.floor((t.firstBeat + (b + 1) * bar) * RES); let a = 0; for (let i = s0; i < s1 && i < r.length; i++) a += r[i]; e.push(a / Math.max(1, s1 - s0)); }
+  return (t.barR = e);
+}
+// Structure du son : où sont les vraies phrases de 32 temps (8 mesures), où la basse arrive et où elle s'arrête.
+// Les changements (arrivée de la basse, break, drop, sortie) tombent sur les débuts de phrase :
+// on cherche le décalage (0 à 7 mesures) qui aligne le mieux la grille de 32 temps sur ces changements.
 function structureOf(t){
   if (t.struct) return t.struct;
-  // Énergie des basses mesure par mesure, depuis le 1er temps
-  const e = barEnergy(t), nb = e.length, bar = 240 / t.bpm;
+  const e = barEnergy(t), r = barRms(t), nb = e.length, bar = 240 / t.bpm, m = t.markers || {};
   const sorted = [...e].sort((a, b) => a - b), ref = sorted[Math.floor(nb * 0.75)] || 0, thr = 0.45 * ref;
-  const snap4 = b => { const r = Math.round(b / 4) * 4; return Math.abs(b - r) <= 1 ? r : b; };
-  // Entrée de la basse : 1re mesure où la ligne de basse est là et tient
   let bi = e.findIndex((v, i) => v >= thr && (e[i + 1] ?? v) >= thr); if (bi < 0) bi = 0;
-  bi = bi <= 2 ? 0 : snap4(bi);
-  // Sortie de la basse : dernière mesure où elle tient encore
   let bo = nb; for (let i = nb - 1; i > bi; i--) if (e[i] >= thr && (e[i - 1] ?? e[i]) >= thr){ bo = i + 1; break; }
-  bo = snap4(bo);
-  const m = t.markers || {};
+  const mx = a => Math.max(1e-9, ...a), em = mx(e), rm = mx(r), x = e.map((v, i) => v / em + r[i] / rm);
+  const ch = new Array(nb).fill(0);
+  for (let b = 4; b + 4 <= nb; b++){ let s1 = 0, s0 = 0; for (let j = 0; j < 4; j++){ s1 += x[b + j]; s0 += x[b - 4 + j]; } ch[b] = Math.abs(s1 - s0) / 4; }
+  const sc = new Array(8).fill(0); for (let b = 4; b < nb; b++) sc[b % 8] += ch[b] * ch[b];
+  const order = [0, 1, 2, 3, 4, 5, 6, 7].sort((a, b) => sc[b] - sc[a]);
+  let ph = 0;
+  if (m.kick == null && sc[order[0]] > 1.3 * sc[order[1]] && sc[0] < 0.8 * sc[order[0]]) ph = order[0];
+  const snapP = b => {
+    const r8 = ph + Math.round((b - ph) / 8) * 8; if (Math.abs(b - r8) <= 2) return Math.max(0, r8);
+    const p4 = ph % 4, r4 = p4 + Math.round((b - p4) / 4) * 4; return Math.abs(b - r4) <= 1 ? Math.max(0, r4) : b;
+  };
+  bi = bi <= 2 ? 0 : snapP(bi); bo = snapP(bo);
   if (m.bass != null) bi = Math.max(0, Math.round((m.bass - t.firstBeat) / bar));
   if (m.out != null) bo = Math.max(bi + 1, Math.round((m.out - t.firstBeat) / bar));
-  t.struct = {drop: t.firstBeat + bi * bar, outro: t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb};
+  t.struct = {drop: t.firstBeat + bi * bar, outro: t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph};
   return t.struct;
 }
 
@@ -908,6 +923,13 @@ class Deck {
     this.rate = rate;
     if (this.src) this.src.playbackRate.setValueAtTime(rate, now);
     this.applyFx();
+  }
+  // Petit coup de pitch pour rattraper un décalage (en secondes) en 0,8 s, puis retour au tempo exact
+  nudge(shift){
+    if (!this.playing || this.nudging) return;
+    const base = this.rate, T = 0.8; this.nudging = true;
+    this.setRate(base * (1 + shift / T));
+    setTimeout(() => { this.setRate(base); this.nudging = false; }, T * 1000);
   }
   applyFx(){
     const a = this.fxAmt, r = this.fxRate, fb = this.fxFb, now = ctx.currentTime, T = 0.04, on = n => this.fx === n ? 1 : 0;
@@ -1326,9 +1348,10 @@ function makePlan(o, n){
   let r = tempoRatio(o, n); const synced = Math.abs(r - 1) <= 0.16; if (!synced) r = 1;
   const ob = o.beatLen, nb = n.beatLen, pos = o.pos(), lead = 1.2 * o.rate;
   const E = endOfMusic(o.item);
-  const nStart = n.item.start ?? n.firstBeat;
+  // B part toujours sur un début de SA phrase de 32 temps, A est compté sur SES phrases : les blocs de 32 tombent ensemble
+  const nStart = sn.phrase0 ?? (n.item.start ?? n.firstBeat), oPh = so.phrase0 ?? o.firstBeat;
   const phrase = 32 * ob;
-  const grid = (t, step, up) => o.firstBeat + (up ? Math.ceil((t - o.firstBeat) / step - 1e-6) : Math.floor((t - o.firstBeat) / step + 1e-6)) * step;
+  const grid = (t, step, up) => oPh + (up ? Math.ceil((t - oPh) / step - 1e-6) : Math.floor((t - oPh) / step + 1e-6)) * step;
   // Intro de B jusqu'à l'arrivée de sa basse / de son kick plein (en temps)
   const introB = Math.max(0, Math.round((sn.drop - nStart) / nb));
   // Durée de B en arrière-plan (basses coupées) avant le swap : 32 temps (mix long), 16 (court) ou 0 (swap direct)
@@ -1632,7 +1655,7 @@ async function loadItem(i, deckId){
   d.loading = t.name;
   try {
     if (!t.buffer) t.buffer = await decode(await t.file.arrayBuffer());
-    if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start;
+    if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
       if (t.markers && t.markers.kick != null){ t.firstBeat = t.start = t.markers.kick; } }
     d.load(t);
     d.ctl.lo.set(0); d.ctl.filt.set(0);
@@ -1726,7 +1749,8 @@ function drawOver(d){
     }
     const st = d.item.struct, u = H / 80;
     o.fillStyle = 'rgba(32,230,232,.35)';
-    for (let t = d.firstBeat; t < d.duration; t += 32 * d.beatLen) o.fillRect(Math.round(t / d.duration * W), 0, Math.max(1, u), H * 0.18);
+    const ph32 = 32 * d.beatLen, p0 = st.phrase0 ?? d.firstBeat;
+    for (let t = p0 - Math.floor((p0 - d.firstBeat) / ph32) * ph32; t < d.duration; t += ph32) o.fillRect(Math.round(t / d.duration * W), 0, Math.max(1, u), H * 0.18);
     o.font = `${Math.round(H * 0.16)}px ${LCD_FONT}`; o.textBaseline = 'top';
     [[d.firstBeat, '#20e6e8', 'K'], [st.drop, C.go, 'B'], [st.outro, C.alert, 'F']].forEach(([t, col, lb]) => {
       const x = Math.round(t / d.duration * W); o.fillStyle = col; o.fillRect(x, 0, 2 * u, H);
@@ -1804,14 +1828,41 @@ function updateLcd(){
   else if (endOfList){ a = 'FIN DE LA PLAYLIST'; b = 'Ajoute des morceaux'; }
   else { a = 'SMART MIX ON'; b = 'Prépare le son suivant…'; }
   if (!plan && cur && auto){ const n = peekNext(cur); b = `Suivant : ${n ? n.name : '—'}`; }
+  if (lockInfo && ctx.currentTime - lockInfo.t < 1.6) b = lockInfo.txt + ' · ' + b;
   setText($('ml1'), a); setText($('ml2'), b);
 }
 
 let lastDraw = 0;
+// Calage automatique : on compare les kicks réellement joués par les deux platines.
+// S'ils ne tombent pas ensemble, petit coup de pitch sur le son qui entre ; une fois calé, on ne touche plus.
+let lastLock = 0, lockInfo = null;
+const envAt = (t, sec) => { const x = sec * t.envRate, i = Math.floor(x), f = x - i, e = t.env; return i >= 0 && i + 1 < e.length ? e[i] * (1 - f) + e[i + 1] * f : 0; };
+function phaseLock(){
+  const now = ctx.currentTime; if (now - lastLock < 2) return; lastLock = now;
+  const A = decks.A, B = decks.B;
+  if (!A.playing || !B.playing || !A.item?.env || !B.item?.env || A.nudging || B.nudging) return;
+  if (now - Math.max(A.t0, B.t0) < 1.5) return;
+  if (Math.abs(A.bpm * A.rate - B.bpm * B.rate) > 0.08) return;
+  const master = plan && plan.scheduled ? plan.o : (A.t0 <= B.t0 ? A : B), slave = other(master);
+  const beat = 60 / (master.bpm * master.rate), W = Math.min(8 * beat, now - Math.max(A.t0, B.t0) - 0.1), step = 0.002;
+  const N = Math.floor(W / step), L = Math.floor(0.45 * beat / step); if (N < 50) return;
+  const pm = master.pos(), ps = slave.pos(), a = new Float32Array(N), bx = new Float32Array(N + 2 * L);
+  for (let k = 0; k < N; k++){ const back = (N - k) * step; a[k] = envAt(master.item, pm - back * master.rate); }
+  for (let k = -L; k < N + L; k++){ const back = (N - k) * step; bx[k + L] = envAt(slave.item, ps - back * slave.rate); }
+  let best = -1, bj = 0, sum = 0;
+  for (let j = -L; j <= L; j++){ let c = 0; for (let k = 0; k < N; k++) c += a[k] * bx[k + j + L]; sum += c; if (c > best){ best = c; bj = j; } }
+  const mean = sum / (2 * L + 1); if (best < 1.4 * mean || best <= 0) return;   // pas assez de kicks pour juger
+  const late = bj * step;   // > 0 : le son qui entre est en retard
+  if (Math.abs(late) < 0.004){ lockInfo = {t: now, txt: 'CALÉ ✓'}; return; }
+  slave.nudge(clamp(late, -0.06, 0.06));
+  lockInfo = {t: now, txt: `CALAGE ${slave.id} ${late > 0 ? '+' : ''}${Math.round(late * 1000)} ms`};
+}
+
 function frame(now){
   if (now - lastDraw < 32){ autoTick(); requestAnimationFrame(frame); return; }
   lastDraw = now;
   autoTick();
+  phaseLock();
   for (const d of Object.values(decks)){
     drawZoom(d); drawOver(d);
     const has = !!d.buffer;
@@ -1871,7 +1922,7 @@ requestAnimationFrame(frame);
       const t = {name: s.name, buffer: bufs[i], bpm: s.bpm, firstBeat: 0};
       t.peaks = computePeaks(t.buffer);
       const bar = 240 / s.bpm;
-      t.struct = {drop: 8 * bar, outro: 40 * bar, dropBar: 8, outroBar: 40, nb: 48};
+      t.struct = {drop: 8 * bar, outro: 40 * bar, dropBar: 8, outroBar: 40, nb: 48, phrase0: 0, phraseBar: 0};
       lib.push(t);
     });
     lib.unshift(...saved);

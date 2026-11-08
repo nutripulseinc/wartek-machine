@@ -781,7 +781,10 @@ function setMarker(d, kind){
   const t = d.item; if (!t || !t.bpm) return;
   const bl = 60 / t.bpm, pos = d.pos(); t.markers = t.markers || {};
   let msg;
-  if (kind === 'kick'){
+  if (kind === 'reset'){
+    if (t.fitInfo){ t.firstBeat = t.start = d.firstBeat = t.fitInfo.fb; }
+    t.markers = {}; msg = 'Marqueurs effacés : K, B1, B2 et F recalculés automatiquement';
+  } else if (kind === 'kick'){
     const k = Math.round((pos - t.firstBeat) / bl), fb = t.firstBeat + k * bl;
     t.firstBeat = t.start = d.firstBeat = d.cue = fb; t.markers.kick = fb;
     msg = `KICK posé à ${fmt(fb)} : les mesures et les phrases de 32 temps partent d'ici`;
@@ -1352,7 +1355,7 @@ function panelMarkup(id){
             <input type="file" id="${id}-file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden>
           </div>
           <div class="lcd small">
-            <div class="fname"><span id="${id}-fname">Aucun morceau</span><span class="mk"><button data-mk="kick" data-d="${id}" aria-label="Poser le marqueur KICK ici">K</button><button data-mk="bass" data-d="${id}" aria-label="Poser le marqueur B1 (1re ligne de basse) ici">B1</button><button data-mk="bass2" data-d="${id}" aria-label="Poser le marqueur B2 (dernière ligne de basse) ici">B2</button><button data-mk="out" data-d="${id}" aria-label="Poser le marqueur FIN de basse ici">F</button></span><button id="${id}-eject" aria-label="Éjecter le morceau">×</button></div>
+            <div class="fname"><span id="${id}-fname">Aucun morceau</span><span class="mk"><button data-mk="kick" data-d="${id}" aria-label="Poser le marqueur KICK ici">K</button><button data-mk="bass" data-d="${id}" aria-label="Poser le marqueur B1 (1re ligne de basse) ici">B1</button><button data-mk="bass2" data-d="${id}" aria-label="Poser le marqueur B2 (dernière ligne de basse) ici">B2</button><button data-mk="out" data-d="${id}" aria-label="Poser le marqueur FIN de basse ici">F</button><button data-mk="reset" data-d="${id}" aria-label="Effacer mes marqueurs : tout recalculer automatiquement">↺</button></span><button id="${id}-eject" aria-label="Éjecter le morceau">×</button></div>
             <canvas id="${id}-over" aria-label="Morceau entier : touche pour te déplacer"></canvas>
           </div>
         </div>
@@ -1677,7 +1680,7 @@ function makePlan(o, n){
   // Règle principale : la 1re basse de B (B1) part EN MÊME TEMPS que la dernière ligne de basse de A (B2).
   // B est lancé sur son 1er kick (K) exactement la longueur de son intro avant.
   // K2 = point de lancement sur A : B2 de A moins la durée K→B1 de B. Le K de B tombe sur K2, donc B1 tombe sur B2.
-  const Ifull = Math.round(introB / 4) * 4;
+  const Ifull = introB;   // exactement le nombre de temps K → B1 du son qui entre (pas d'arrondi)
   let useB2 = false, why = '';
   if (!synced) why = 'Tempos trop éloignés';
   else if (so.lastBass == null) why = `Pas de B2 trouvé sur ${o.id}`;
@@ -2044,7 +2047,8 @@ async function loadItem(i, deckId){
     if (!t.buffer) t.buffer = await decode(await t.file.arrayBuffer());
     if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
       const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
-      if (t.markers && t.markers.kick != null){ t.firstBeat = t.start = t.markers.kick; } }
+      // K posé à la main : il choisit QUEL kick est le départ, mais reste collé pile sur la grille mesurée
+      if (t.markers && t.markers.kick != null){ const bl = 60 / t.bpm; t.firstBeat = t.start = t.firstBeat + Math.round((t.markers.kick - t.firstBeat) / bl) * bl; } }
     d.load(t);
     autoSyncIdle(d);
     d.ctl.lo.set(0); d.ctl.filt.set(0);

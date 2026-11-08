@@ -249,6 +249,7 @@ button{cursor:pointer}
 .mk-k{color:#20e6e8!important}.mk-b1{color:#3dffb0!important}.mk-b2{color:#e5ff3d!important}.mk-f{color:#ff3d6e!important}.mk-c{color:#ff9a3d!important}
 .edsave{border-color:var(--go)!important;color:var(--go)!important}
 .edplay.on{background:#3dffb0!important;color:#031216!important}
+.edtog[aria-pressed="true"]{border-color:#ffb13d!important;color:#ffb13d!important}
 .qplist li{grid-template-columns:40px 1fr 100px;cursor:pointer;user-select:none;-webkit-user-select:none}
 .qplist .ck{width:30px;height:30px;border-radius:6px;border:2px solid var(--mute);display:grid;place-items:center;font-family:var(--font-lcd);font-size:15px;font-weight:700;color:#031216}
 .qplist li[aria-checked="true"] .ck{background:var(--qc,#20e6e8);border-color:var(--qc,#20e6e8);box-shadow:0 0 10px var(--qc,#20e6e8)}
@@ -658,7 +659,8 @@ body[data-skin="psy"] .bline{background:linear-gradient(90deg,transparent,#3dffb
         <div class="edbar">
           <div class="edgrp"><span class="edlbl">BPM</span><button data-bpm="-0.1">−0,1</button><button data-bpm="-0.01">−0,01</button><b id="ed-bpm">—</b><button data-bpm="0.01">+0,01</button><button data-bpm="0.1">+0,1</button><button data-bpmx="0.5">÷2</button><button data-bpmx="2">×2</button></div>
           <div class="edgrp"><span class="edlbl">Grille</span><button data-gs="-0.005">◀◀ 5 ms</button><button data-gs="-0.001">◀ 1</button><button data-gs="0.001">1 ▶</button><button data-gs="0.005">5 ms ▶▶</button></div>
-          <div class="edgrp"><span class="edlbl">Zoom</span><button id="ed-zout">−</button><button id="ed-zin">+</button><button id="ed-play" class="edplay">▶ Écouter</button></div>
+          <div class="edgrp"><span class="edlbl">Zoom</span><button id="ed-zout">−</button><button id="ed-zin">+</button><button id="ed-play" class="edplay">▶ Écouter</button><button id="ed-click" class="edtog" aria-pressed="true">Clic grille</button></div>
+          <div class="edgrp"><span class="edlbl">BPM précis</span><button id="ed-measure" title="Place le curseur sur un kick loin du K (fin du morceau) puis touche ici">Mesurer K → curseur</button></div>
         </div>
         <div class="edbar">
           <div class="edgrp"><span class="edlbl">Poser au curseur</span><button data-em="kick" class="mk-k">K</button><button data-em="bass" class="mk-b1">B1</button><button data-em="bass2" class="mk-b2">B2</button><button data-em="out" class="mk-f">F</button><button data-em="cut" class="mk-c">C</button><button data-em="cutx" title="Enlever C">C ✕</button></div>
@@ -2037,9 +2039,16 @@ function edPlay(){
   if (live && route === 'normal'){ toast('Un son joue sur l\'enceinte : passe la sortie casque en « Câble séparateur » ou « Casque seul » pour écouter ici sans que le public l\'entende.'); return; }
   const s = ctx.createBufferSource(); s.buffer = ED.t.buffer; s.connect(live ? cueBus : masterBus);
   const when = ctx.currentTime + 0.05; s.start(when, Math.max(0, ED.cur)); ED.src = s; ED.srcT0 = when; ED.srcOff = Math.max(0, ED.cur);
+  ED.clickNext = Math.ceil((ED.srcOff - ED.fb) / edT());
+  ED.clickOut = live ? cueBus : masterBus;
   s.onended = () => { if (ED.src === s) edStop(); };
   $('ed-play').classList.add('on'); $('ed-play').textContent = '■ Stop';
-  const loop = () => { if (!ED.src) return; if ($('editor').hidden){ edStop(); return; } const p = ED.srcOff + (ctx.currentTime - ED.srcT0); if (p > ED.view + ED.span * 0.9) ED.view = p - ED.span * 0.1; edDraw(); ED.raf = requestAnimationFrame(loop); };
+  const loop = () => { if (!ED.src) return; if ($('editor').hidden){ edStop(); return; }
+    if ($('ed-click').getAttribute('aria-pressed') === 'true'){   // clic sur chaque temps de la grille (plus aigu sur le 1er temps de la mesure)
+      const T = edT(), now = ctx.currentTime;
+      for (;;){ const tb = ED.fb + ED.clickNext * T, at = ED.srcT0 + (tb - ED.srcOff); if (at > now + 0.25) break;
+        if (at > now){ const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = ED.clickNext % 4 === 0 ? 2000 : 1300; g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.5, at + 0.001); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.03); o.connect(g); g.connect(ED.clickOut); o.start(at); o.stop(at + 0.04); }
+        ED.clickNext++; } } const p = ED.srcOff + (ctx.currentTime - ED.srcT0); if (p > ED.view + ED.span * 0.9) ED.view = p - ED.span * 0.1; edDraw(); ED.raf = requestAnimationFrame(loop); };
   ED.raf = requestAnimationFrame(loop);
 }
 // Pointeur sur le zoom : toucher = curseur, glisser = se déplacer
@@ -2057,7 +2066,7 @@ document.addEventListener('click', e => {
   else if (b.dataset.bpmx) ED.bpm = Math.round(ED.bpm * parseFloat(b.dataset.bpmx) * 100) / 100;
   else if (b.dataset.gs){ const d = parseFloat(b.dataset.gs); ED.fb += d; ED.m.kick = ED.fb; }
   else { const k = b.dataset.em;
-    if (k === 'kick'){ ED.fb = ED.cur; ED.m.kick = ED.cur; }   // K exactement au curseur : la grille part d'ici
+    if (k === 'kick'){ const a = snapAttack(ED.t.buffer, ED.cur, 0.03); const x = a ?? ED.cur; ED.fb = x; ED.m.kick = x; ED.cur = x; if (a != null) toast('K collé sur l\'attaque du kick (aimant).', 1800); }   // K sur l'attaque exacte : la grille part d'ici
     else if (k === 'cutx') ED.m.cut = null;
     else ED.m[k] = edSnapBar(ED.cur); }
   edDraw();
@@ -2065,6 +2074,17 @@ document.addEventListener('click', e => {
 $('ed-zin').addEventListener('click', () => { if (ED.span > 0.3){ const c = ED.cur; ED.span /= 2; ED.view = c - ED.span / 3; edDraw(); } });
 $('ed-zout').addEventListener('click', () => { if (ED.span < 200){ const c = ED.cur; ED.span *= 2; ED.view = Math.max(-ED.span / 2, c - ED.span / 3); edDraw(); } });
 $('ed-play').addEventListener('click', edPlay);
+$('ed-click').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); });
+// BPM précis : K sur un kick au début, curseur sur un kick loin (fin du morceau) → BPM = nombre de temps / durée entre les deux
+$('ed-measure').addEventListener('click', () => {
+  const T0 = edT(), g = ED.fb + Math.round((ED.cur - ED.fb) / T0) * T0;   // le kick de la grille le plus proche du curseur
+  const a = snapAttack(ED.t.buffer, g, Math.min(0.04, 0.2 * T0)), x = a ?? g, d = x - ED.fb, T = T0;
+  if (d < 20 * T){ toast('Place le curseur sur un kick bien plus loin que le K (idéalement vers la fin du morceau), puis recommence.'); return; }
+  const nb = Math.round(d / T), bpm = 60 * nb / d;
+  if (Math.abs(bpm / ED.bpm - 1) > 0.03){ toast('Le curseur n\'est pas sur un kick de la grille : rapproche-le d\'un kick et recommence.'); return; }
+  ED.bpm = Math.round(bpm * 100) / 100; ED.cur = x; edDraw();
+  toast(`BPM mesuré sur ${nb} temps : ${ED.bpm.toFixed(2)}. Vérifie avec Écouter + Clic grille, puis Enregistrer.`, 4200);
+});
 $('ed-close').addEventListener('click', () => { edStop(); $('editor').hidden = true; });
 $('ed-auto').addEventListener('click', () => {
   const t = ED.t; ED.bpm = t.autoBpm || t.bpm; ED.fb = t.autoFb ?? t.firstBeat;
@@ -2626,26 +2646,36 @@ function localShift(t, at){
   if (Math.abs(med) < 0.0015) return 0;
   return med;
 }
-// K et début des mesures :
-// 1) on remonte la grille jusqu'au tout premier temps où le son joue (le morceau peut démarrer à 0,04 s : ce kick-là compte) ;
-// 2) on cherche sur quel temps (1, 2, 3 ou 4) tombent les grands changements du morceau (arrivée des basses, breaks, drops) :
-//    c'est le premier temps de la mesure. K = premier temps de mesure qui joue → B1, B2, F tombent pile sur les mesures.
+// Position exacte d'une attaque de kick autour de x (± win s), lue dans le son : montée la plus raide (grave + médium)
+function snapAttack(buf, x, win = 0.04){
+  const sr = buf.sampleRate, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L, ms = Math.round(sr / 1000);
+  const a = 1 - Math.exp(-2 * Math.PI * 600 / sr), rel = Math.exp(-1 / (0.03 * sr)), s0 = Math.max(0, Math.floor((x - win - 0.01) * sr)), s1 = Math.min(L.length, Math.floor((x + win) * sr));
+  let y1 = 0, y2 = 0, pf = 0, hp = 0, ph = 0, m1 = 0, m2 = 0, c = 0; const l1 = [], l2 = [];
+  for (let i = Math.max(0, s0 - Math.floor(0.03 * sr)); i < s1; i++){ const v = (L[i] + R[i]) * 0.5; y1 += a * (v - y1); y2 += a * (y1 - y2); hp = v - y1;
+    const v1 = Math.abs(y2), v2 = Math.abs(hp); pf = v1 > pf ? v1 : pf * rel; ph = v2 > ph ? v2 : ph * rel;
+    if (i < s0) continue; if (pf > m1) m1 = pf; if (ph > m2) m2 = ph; if (++c === ms){ l1.push(Math.log(m1 + 1e-6)); l2.push(Math.log(m2 + 1e-6)); m1 = m2 = 0; c = 0; } }
+  let best = 0, bk = -1; for (let k = 3; k < l1.length; k++){ const r = Math.max(0, l1[k] - l1[k - 3]) + 0.6 * Math.max(0, l2[k] - l2[k - 3]); if (r > best){ best = r; bk = k; } }
+  return bk < 0 || best < 0.4 ? null : s0 / sr + (bk - 2) / 1000;
+}
+// K = le point de départ réel du morceau, et la grille calée sur les vrais kicks de l'intro :
+// 1) premier instant où le son démarre ;
+// 2) sur l'intro (là où le kick est presque seul), on vérifie que la grille est bien SUR les kicks et pas sur un contretemps
+//    (grave qui monte pile sur les temps, comparé au ¼, ½, ¾ de temps) ;
+// 3) K = le temps de la grille au départ du son, recollé sur l'attaque exacte. Les mesures partent de K.
 function downbeat(t){
-  const T = 60 / t.bpm, rms = t.peaks.rms, R = RES, n = rms.length;
-  const lev = (a, b) => { let m = 0, c = 0; for (let i = Math.max(0, Math.floor(a * R)); i < Math.min(n, Math.ceil(b * R)); i++){ m += rms[i]; c++; } return c ? m / c : 0; };
-  let fb = t.firstBeat;
-  // un temps « joue » s'il y a du son ET une attaque (ou si c'est le tout début du fichier)
-  const hit = tb => lev(tb - 0.01, tb + 0.05) > 0.06 && (tb < 0.03 || lev(tb - 0.005, tb + 0.03) > 1.4 * lev(tb - 0.07, tb - 0.025));
-  while (fb - T > -0.03 && hit(fb - T)) fb -= T;
-  // énergie par temps et sauts d'un temps à l'autre
-  const nb = Math.floor((t.buffer.duration - fb) / T); if (nb < 32) return {fb, q: 0, sure: 0};
-  const E = []; for (let b = 0; b < nb; b++) E.push(Math.log(lev(fb + b * T, fb + (b + 1) * T) + 1e-3));
-  const sc = [0, 0, 0, 0];
-  for (let b = 1; b < nb; b++){ const j = Math.abs(E[b] - E[b - 1]); if (j > 0.25) sc[b % 4] += j; }
-  const order = [0, 1, 2, 3].sort((a, b) => sc[b] - sc[a]), q = order[0];
-  const sure = sc[order[1]] > 0 ? sc[q] / sc[order[1]] : 9;
-  if (q !== 0 && sure >= 1.5) fb += q * T;   // les changements tombent clairement sur un autre temps : la mesure commence là
-  return {fb, q, sure: +sure.toFixed(2)};
+  const T = 60 / t.bpm, rms = t.peaks.rms, lo = t.peaks.lo, R = RES, n = rms.length;
+  let t0 = 0; { const thr = 0.05; let i = 0; while (i < n && rms[i] < thr) i++; t0 = i / R; }
+  const at0 = snapAttack(t.buffer, t0 + 0.01, 0.04); if (at0 != null) t0 = at0;
+  let fb = t.firstBeat, shift = 0, q = 0;
+  // Le morceau démarre sur un kick net, mais la grille tombe à mi-chemin entre deux temps : la grille est sur un contretemps
+  // (basse, clap). On la recale sur ce premier kick.
+  { let r = (t0 - fb) / T; r = (r - Math.round(r)) * T;
+    if (at0 != null && Math.abs(r) >= 0.3 * T){ shift = r; fb += r; q = Math.round(r / T * 4); } }
+  // K = le temps de la grille au départ du son
+  let k = fb + Math.round((t0 - fb) / T) * T;
+  if (Math.abs(k - t0) > 0.35 * T) k = fb + Math.ceil((t0 - fb) / T - 0.35) * T;   // le son démarre entre deux temps (pad, voix) : premier vrai temps
+  const ak = snapAttack(t.buffer, k, 0.025); const off = ak != null && Math.abs(ak - k) < 0.02 ? ak - k : 0;
+  return {fb: k + off, t0: +t0.toFixed(4), q, shift_ms: Math.round(shift * 1000)};
 }
 function kickLag(o, n, aStart, bStart, rA, rB, t1, t2, beat){
   if (!o.item || !n.item) return null;

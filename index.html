@@ -94,6 +94,10 @@ button{cursor:pointer}
 .fname{position:absolute;left:0;right:0;top:0;height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;font-size:15px;color:var(--fg);background:rgba(255,255,255,.04);border-bottom:1px solid #22344a;z-index:1}
 .fname span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .fname button{border:0;background:none;padding:0 2px;font-size:18px;color:var(--fg);line-height:1}
+.fname > span:first-child{flex:1;min-width:0}
+.fname .mk{display:flex;gap:4px;margin:0 6px;flex:none}
+.fname .mk button{font-family:var(--font-lcd);font-size:12px;height:18px;min-width:22px;padding:0 4px;border-radius:3px;border:1px solid currentColor;line-height:16px}
+.fname .mk [data-mk="kick"]{color:#20e6e8}.fname .mk [data-mk="bass"]{color:#3dffb0}.fname .mk [data-mk="out"]{color:#ff3d6e}
 .lcd.small canvas{top:24px;height:calc(100% - 24px);cursor:pointer}
 
 .synccol,.playcol{display:grid;justify-items:center;align-content:center;gap:6px;text-align:center}
@@ -517,9 +521,29 @@ function idb(store, mode, fn){
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
 let storeWarned = false;
 async function saveTrack(t){
-  try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file})); }
+  try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file, markers: t.markers || null})); }
   catch(e){ if (!storeWarned){ storeWarned = true; toast('Plus de place pour garder tes morceaux : ceux-là seront à réimporter la prochaine fois.'); } }
 }
+// Marqueurs posés à la main, à l'endroit où joue la platine (calés sur le temps ou la mesure)
+function setMarker(d, kind){
+  const t = d.item; if (!t || !t.bpm) return;
+  const bl = 60 / t.bpm, pos = d.pos(); t.markers = t.markers || {};
+  let msg;
+  if (kind === 'kick'){
+    const k = Math.round((pos - t.firstBeat) / bl), fb = t.firstBeat + k * bl;
+    t.firstBeat = t.start = d.firstBeat = d.cue = fb; t.markers.kick = fb;
+    msg = `KICK posé à ${fmt(fb)} : les mesures et les phrases de 32 temps partent d'ici`;
+  } else {
+    const bar = 4 * bl, b = Math.max(0, Math.round((pos - t.firstBeat) / bar));
+    t.markers[kind] = t.firstBeat + b * bar;
+    msg = kind === 'bass' ? `1re BASSE posée mesure ${b + 1} (${b * 4} temps après le KICK)` : `FIN de basse posée mesure ${b + 1}`;
+  }
+  t.struct = null; t.barE = null; structureOf(t); d.overDirty = true;
+  if (t.id) saveTrack(t);
+  if (plan && !plan.scheduled) replanIfNeeded();
+  toast(msg, 3400);
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-mk]'); if (b) setMarker(decks[b.dataset.d], b.dataset.mk); });
 function saveOrder(){ idb('samples', 'readwrite', st => st.put(lib.filter(t => t.id).map(t => t.id), '__order')).catch(() => {}); }
 
 /* ---------- Analyse des morceaux ---------- */
@@ -675,6 +699,9 @@ function structureOf(t){
   // Sortie de la basse : dernière mesure où elle tient encore
   let bo = nb; for (let i = nb - 1; i > bi; i--) if (e[i] >= thr && (e[i - 1] ?? e[i]) >= thr){ bo = i + 1; break; }
   bo = snap4(bo);
+  const m = t.markers || {};
+  if (m.bass != null) bi = Math.max(0, Math.round((m.bass - t.firstBeat) / bar));
+  if (m.out != null) bo = Math.max(bi + 1, Math.round((m.out - t.firstBeat) / bar));
   t.struct = {drop: t.firstBeat + bi * bar, outro: t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb};
   return t.struct;
 }
@@ -1002,7 +1029,7 @@ function panelMarkup(id){
             <input type="file" id="${id}-file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden>
           </div>
           <div class="lcd small">
-            <div class="fname"><span id="${id}-fname">Aucun morceau</span><button id="${id}-eject" aria-label="Éjecter le morceau">×</button></div>
+            <div class="fname"><span id="${id}-fname">Aucun morceau</span><span class="mk"><button data-mk="kick" data-d="${id}" aria-label="Poser le marqueur KICK ici">K</button><button data-mk="bass" data-d="${id}" aria-label="Poser le marqueur 1re BASSE ici">B</button><button data-mk="out" data-d="${id}" aria-label="Poser le marqueur FIN de basse ici">F</button></span><button id="${id}-eject" aria-label="Éjecter le morceau">×</button></div>
             <canvas id="${id}-over" aria-label="Morceau entier : touche pour te déplacer"></canvas>
           </div>
         </div>
@@ -1304,16 +1331,24 @@ function makePlan(o, n){
   if (!synced && I > 16){ bStart = sn.drop - 16 * nb; I = 16; }
   const phrase = 32 * ob;
   const grid = (t, step, up) => o.firstBeat + (up ? Math.ceil((t - o.firstBeat) / step - 1e-6) : Math.floor((t - o.firstBeat) / step + 1e-6)) * step;
-  // Lancement de B = 1er temps juste après une phrase de 32 temps de A, choisi pour que la basse de B
-  // arrive au plus tard quand celle de A s'arrête
-  const target = Math.min(so.outro, E - 8 * ob);
-  let aStart = grid(target - I * ob, phrase, false);
-  if (aStart < pos + lead){
-    aStart = grid(pos + lead, phrase, true);
-    if (aStart > E - 8 * ob) aStart = grid(pos + lead, 16 * ob, true);
-    if (aStart > E - 4 * ob) aStart = grid(pos + lead, 4 * ob, true);
+  // P = 1er temps d'une phrase de 32 temps de A, là où la basse de A s'arrête (marqueur FIN), jamais après la fin de A.
+  // B est lancé sur son KICK exactement I temps avant : sa 1re BASSE tombe pile sur P.
+  // Comme I est un nombre entier de mesures, les 8, 16 et 32 temps des deux sons restent alignés.
+  const last = E - 4 * ob;
+  let P = grid(Math.min(so.outro, last), phrase, false);
+  if (P - I * ob < pos + lead){
+    P = grid(pos + lead + I * ob, phrase, true);
+    if (P > last){
+      // Pas assez de place pour toute l'intro de B : on la raccourcit par blocs de 16 temps,
+      // B part plus loin dans son intro mais sa basse tombe toujours sur un début de phrase de A
+      P = grid(pos + lead + 16 * ob, phrase, true);
+      if (P > last) P = grid(pos + lead + 16 * ob, 16 * ob, true);
+      if (P > last) P = grid(pos + lead, 4 * ob, true);
+      const room = Math.floor((P - pos - lead) / ob / 16) * 16, I2 = Math.max(0, Math.min(I, room));
+      bStart = sn.drop - I2 * nb; I = I2;
+    }
   }
-  const P = aStart + I * ob;
+  const aStart = P - I * ob;
   const eB = barEnergy(n.item), dBar = sn.dropBar;
   const refE = eB.slice(dBar, dBar + 4).reduce((a, b) => a + b, 0) / Math.max(1, Math.min(4, eB.length - dBar));
   const postBars = clamp(Math.floor((E - P) / (4 * ob)), 1, 8);
@@ -1425,6 +1460,9 @@ function startTransition(dt){
 function finishTransition(){
   const {o, n} = plan, manual = plan.manual; plan = null;
   restoreDeck(o);
+  // B toujours à fond à la fin du mix (même si A s'est arrêté avant la basse de B)
+  ['lo', 'mid', 'hi'].forEach(k => { if (n.ctl[k].value !== 0) n.ctl[k].set(0); });
+  if (n.ctl.vol.value < 100) n.ctl.vol.set(100);
   if (manual){ waitFree = {cur: n, free: o}; return; }
   o.pause();
   ['lo', 'mid', 'hi', 'filt'].forEach(k => o.ctl[k].set(0));
@@ -1450,7 +1488,7 @@ function autoTick(){
     if (!ev.armed && !plan.manual && ev.t - now < 0.3){ paramAt(ev.d, ev.key, ev.v, ev.t, ev.tc); ev.armed = true; }
     if (ev.armed && now >= ev.t){ const c = ev.key === 'xf' ? xfCtl : ev.d.ctl[ev.key]; if (c) c.set(ev.v, false); ev.done = true; }
   }
-  if (now >= plan.tEnd || !n.playing) finishTransition();
+  if (now >= plan.tEnd || !n.playing || (!o.playing && now > plan.T0)) finishTransition();
 }
 
 function nextIndexAfter(item){ const i = lib.indexOf(item); return i >= 0 && i + 1 < lib.length ? i + 1 : -1; }
@@ -1582,7 +1620,8 @@ async function loadItem(i, deckId){
   d.loading = t.name;
   try {
     if (!t.buffer) t.buffer = await decode(await t.file.arrayBuffer());
-    if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; }
+    if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start;
+      if (t.markers && t.markers.kick != null){ t.firstBeat = t.start = t.markers.kick; } }
     d.load(t);
     d.ctl.lo.set(0); d.ctl.filt.set(0);
     replanIfNeeded();
@@ -1635,6 +1674,12 @@ function drawZoom(d){
     g.globalAlpha = past ? 0.5 : 1; g.fillStyle = col; const lh = Math.pow(ml, 1.3) * h * 0.47; g.fillRect(x, mid - lh, 1, lh * 2);
   }
   g.globalAlpha = 1;
+  const st = d.item && d.item.struct;
+  if (st) [[d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'BASSE'], [st.outro, C.alert, 'FIN']].forEach(([tm, col, lb]) => {
+    const x = (tm - t0) * pps; if (x < 0 || x > W) return;
+    g.fillStyle = col; g.fillRect(x - u, top, 2 * u, h);
+    g.font = `${Math.round(11 * u)}px ${LCD_FONT}`; g.textBaseline = 'bottom'; g.fillText(lb, x + 3 * u, top + h);
+  });
   g.fillStyle = C.alert; g.fillRect(Math.round(W / 2 - u), top, 2 * u, h);
 }
 
@@ -1670,7 +1715,11 @@ function drawOver(d){
     const st = d.item.struct, u = H / 80;
     o.fillStyle = 'rgba(32,230,232,.35)';
     for (let t = d.firstBeat; t < d.duration; t += 32 * d.beatLen) o.fillRect(Math.round(t / d.duration * W), 0, Math.max(1, u), H * 0.18);
-    [[st.drop, C.go], [st.outro, C.alert]].forEach(([t, col]) => { o.fillStyle = col; o.fillRect(Math.round(t / d.duration * W), 0, 2 * u, H); });
+    o.font = `${Math.round(H * 0.16)}px ${LCD_FONT}`; o.textBaseline = 'top';
+    [[d.firstBeat, '#20e6e8', 'K'], [st.drop, C.go, 'B'], [st.outro, C.alert, 'F']].forEach(([t, col, lb]) => {
+      const x = Math.round(t / d.duration * W); o.fillStyle = col; o.fillRect(x, 0, 2 * u, H);
+      o.fillRect(x, H * 0.2, H * 0.16, H * 0.18); o.fillStyle = '#031216'; o.fillText(lb, x + H * 0.03, H * 0.21);
+    });
     d.overImg = off; d.overDirty = false;
   }
   g.drawImage(d.overImg, 0, 0);
@@ -1797,7 +1846,7 @@ requestAnimationFrame(frame);
     const recs = await idb('tracks', 'readonly', st => st.getAll()) || [];
     const order = await idb('samples', 'readonly', st => st.get('__order')) || [];
     recs.sort((a, b) => (order.indexOf(a.id) + 1 || 1e9) - (order.indexOf(b.id) + 1 || 1e9));
-    saved = recs.map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0}));
+    saved = recs.map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null}));
   } catch(e){}
   const specs = [
     {name: 'Démo · Nuit Chaude', bpm: 122, style: 1, notes: [55, 55, 65.41, 49]},

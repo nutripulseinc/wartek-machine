@@ -233,6 +233,22 @@ button{cursor:pointer}
 .dlist .n{font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dlist .m{font-family:var(--font-lcd);font-size:14px;color:var(--mute)}
 .dlist .dbtn{padding:0}
+.fname .mk .edopen{color:#fff;border-color:#fff;padding:0 6px;margin-right:2px;font-weight:700}
+.edpanel{width:1570px;height:726px;max-height:none}
+.edbody{display:grid;grid-template-rows:120px 1fr auto auto;gap:10px;padding:12px 16px;min-height:0}
+.edbody canvas{display:block;width:100%;height:100%;border-radius:6px;background:var(--lcd)}
+#ed-over{cursor:pointer}
+.edzoomw{position:relative;min-height:0}.edzoomw canvas{position:absolute;inset:0;touch-action:none;cursor:crosshair}
+.edbar{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.edgrp{display:flex;align-items:center;gap:6px}
+.edgrp button{height:44px;min-width:52px;padding:0 12px;border-radius:6px;border:1px solid #2e3a3c;background:#141a1c;color:#e9fbfc;font:600 16px var(--font-ui,inherit);touch-action:manipulation}
+.edgrp button:active{background:#22302f}
+.edgrp b{font-family:var(--font-lcd);font-size:26px;color:#3dffb0;min-width:110px;text-align:center}
+.edlbl{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
+.edinfo{font-family:var(--font-lcd);font-size:15px;color:#cfe3e5;flex:1;min-width:0}
+.mk-k{color:#20e6e8!important}.mk-b1{color:#3dffb0!important}.mk-b2{color:#e5ff3d!important}.mk-f{color:#ff3d6e!important}.mk-c{color:#ff9a3d!important}
+.edsave{border-color:var(--go)!important;color:var(--go)!important}
+.edplay.on{background:#3dffb0!important;color:#031216!important}
 .qplist li{grid-template-columns:40px 1fr 100px;cursor:pointer;user-select:none;-webkit-user-select:none}
 .qplist .ck{width:30px;height:30px;border-radius:6px;border:2px solid var(--mute);display:grid;place-items:center;font-family:var(--font-lcd);font-size:15px;font-weight:700;color:#031216}
 .qplist li[aria-checked="true"] .ck{background:var(--qc,#20e6e8);border-color:var(--qc,#20e6e8);box-shadow:0 0 10px var(--qc,#20e6e8)}
@@ -632,6 +648,26 @@ body[data-skin="psy"] .bline{background:linear-gradient(90deg,transparent,#3dffb
     </div>
   </div>
 
+  <div class="drawer" id="editor" hidden>
+    <div class="dpanel edpanel" role="dialog" aria-label="Éditeur de grille et de marqueurs">
+      <div class="dhead"><h2 id="ed-title">Éditeur</h2>
+        <button class="dbtn" id="ed-auto">↺ Tout auto</button><button class="dbtn edsave" id="ed-save">Enregistrer</button><button class="dbtn" id="ed-close" data-close>Fermer</button></div>
+      <div class="edbody">
+        <canvas id="ed-over" aria-label="Morceau entier : touche pour y aller"></canvas>
+        <div class="edzoomw"><canvas id="ed-zoom" aria-label="Zoom : touche pour placer le curseur, glisse pour te déplacer"></canvas></div>
+        <div class="edbar">
+          <div class="edgrp"><span class="edlbl">BPM</span><button data-bpm="-0.1">−0,1</button><button data-bpm="-0.01">−0,01</button><b id="ed-bpm">—</b><button data-bpm="0.01">+0,01</button><button data-bpm="0.1">+0,1</button><button data-bpmx="0.5">÷2</button><button data-bpmx="2">×2</button></div>
+          <div class="edgrp"><span class="edlbl">Grille</span><button data-gs="-0.005">◀◀ 5 ms</button><button data-gs="-0.001">◀ 1</button><button data-gs="0.001">1 ▶</button><button data-gs="0.005">5 ms ▶▶</button></div>
+          <div class="edgrp"><span class="edlbl">Zoom</span><button id="ed-zout">−</button><button id="ed-zin">+</button><button id="ed-play" class="edplay">▶ Écouter</button></div>
+        </div>
+        <div class="edbar">
+          <div class="edgrp"><span class="edlbl">Poser au curseur</span><button data-em="kick" class="mk-k">K</button><button data-em="bass" class="mk-b1">B1</button><button data-em="bass2" class="mk-b2">B2</button><button data-em="out" class="mk-f">F</button><button data-em="cut" class="mk-c">C</button><button data-em="cutx" title="Enlever C">C ✕</button></div>
+          <span id="ed-info" class="edinfo"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="drawer" id="themes" hidden>
     <div class="dpanel" role="dialog" aria-label="Thèmes" style="width:1100px">
       <div class="dhead"><h2>Thème de la console</h2><button class="dbtn" data-close>Fermer</button></div>
@@ -789,6 +825,7 @@ function setMarker(d, kind){
   let msg;
   if (kind === 'reset'){
     if (t.fitInfo){ t.firstBeat = t.start = d.firstBeat = t.fitInfo.fb; }
+    if (t.autoBpm){ t.bpm = d.bpm = t.autoBpm; t.firstBeat = t.start = d.firstBeat = t.autoFb; } t.manualGrid = false;
     t.markers = {}; msg = 'Marqueurs effacés : K, B1, B2 et F recalculés automatiquement';
   } else if (kind === 'kick'){
     const k = Math.round((pos - t.firstBeat) / bl), fb = t.firstBeat + k * bl;
@@ -1361,7 +1398,7 @@ function panelMarkup(id){
             <input type="file" id="${id}-file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden>
           </div>
           <div class="lcd small">
-            <div class="fname"><span id="${id}-fname">Aucun morceau</span><span class="mk"><button data-mk="kick" data-d="${id}" aria-label="Poser le marqueur KICK ici">K</button><button data-mk="bass" data-d="${id}" aria-label="Poser le marqueur B1 (1re ligne de basse) ici">B1</button><button data-mk="bass2" data-d="${id}" aria-label="Poser le marqueur B2 (dernière ligne de basse) ici">B2</button><button data-mk="out" data-d="${id}" aria-label="Poser le marqueur FIN de basse ici">F</button><button data-mk="reset" data-d="${id}" aria-label="Effacer mes marqueurs : tout recalculer automatiquement">↺</button></span><button id="${id}-eject" aria-label="Éjecter le morceau">×</button></div>
+            <div class="fname"><span id="${id}-fname">Aucun morceau</span><span class="mk"><button data-mk="kick" data-d="${id}" aria-label="Poser le marqueur KICK ici">K</button><button data-mk="bass" data-d="${id}" aria-label="Poser le marqueur B1 (1re ligne de basse) ici">B1</button><button data-mk="bass2" data-d="${id}" aria-label="Poser le marqueur B2 (dernière ligne de basse) ici">B2</button><button data-mk="out" data-d="${id}" aria-label="Poser le marqueur FIN de basse ici">F</button><button data-ed="${id}" class="edopen" aria-label="Ouvrir l'éditeur de grille et de marqueurs">✎ ÉDITER</button><button data-mk="reset" data-d="${id}" aria-label="Effacer mes marqueurs : tout recalculer automatiquement">↺</button></span><button id="${id}-eject" aria-label="Éjecter le morceau">×</button></div>
             <canvas id="${id}-over" aria-label="Morceau entier : touche pour te déplacer"></canvas>
           </div>
         </div>
@@ -1724,6 +1761,7 @@ function makePlan(o, n){
     for (let k = 2; k <= postBars && dBar + k + 1 < eB.length; k++){ if (eB[dBar + k] < 0.4 * refE && eB[dBar + k + 1] < 0.4 * refE){ cutBar = k; break; } }
     cutBars = cutBar || Math.min(16, roomBars);
   }
+  { const mc = o.item.markers && o.item.markers.cut; if (mc != null){ const cb = Math.round((mc - P) / (4 * ob)); if (cb >= 1){ cutBars = Math.min(cb, roomBars); cutBar = null; } } }   // C posé dans l'éditeur
   return {o, n, rate: r, synced, useB2, why, cutBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + cutBars * 4 + 8, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
@@ -1936,6 +1974,120 @@ function earCheck(plan, now){
   n.nudge(lag, Math.max(0.25, Math.abs(lag) / 0.03)); plan.earLast = null;
   lockInfo = {t: now, txt: `RECALAGE ${n.id} ${lag > 0 ? '+' : ''}${Math.round(lag * 1000)} ms`};
 }
+/* ---------- Éditeur de grille et de marqueurs (grand écran, précis) ----------
+   BPM au centième, grille décalable à la milliseconde, K posé exactement sur l'attaque, B1 / B2 / F / C posés
+   sur la mesure. Enregistré avec le morceau : la prochaine fois il est chargé avec ces réglages. */
+const ED = {d: null, t: null, bpm: 0, fb: 0, m: {}, cur: 0, view: 0, span: 0, src: null, srcT0: 0, srcOff: 0, raf: 0};
+const ED_COL = {kick: '#20e6e8', bass: '#3dffb0', bass2: '#e5ff3d', out: '#ff3d6e', cut: '#ff9a3d'};
+const ED_LBL = {kick: 'K', bass: 'B1', bass2: 'B2', out: 'F', cut: 'C'};
+function openEditor(d){
+  const t = d.item; if (!t || !t.bpm || !t.buffer){ toast('Charge d\'abord un morceau sur cette platine.'); return; }
+  const st = structureOf(t);
+  ED.d = d; ED.t = t; ED.bpm = t.bpm; ED.fb = t.firstBeat;
+  ED.m = {kick: t.firstBeat, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: t.markers && t.markers.cut != null ? t.markers.cut : null};
+  ED.cur = d.pos() > 0.5 ? d.pos() : t.firstBeat; ED.span = 4 * 4 * 60 / t.bpm; ED.view = Math.max(0, ED.cur - ED.span / 3);
+  $('ed-title').textContent = `Éditeur · ${t.name}`;
+  $('editor').hidden = false; requestAnimationFrame(edDraw);
+}
+const edT = () => 60 / ED.bpm;
+const edSnapBar = x => ED.fb + Math.round((x - ED.fb) / (4 * edT())) * 4 * edT();
+const edBarNo = x => x == null ? '—' : Math.round((x - ED.fb) / (4 * edT())) + 1;
+function edFit(cv){ const r = cv.getBoundingClientRect(), w = Math.max(10, Math.round(cv.clientWidth * 1.5)), h = Math.max(10, Math.round(cv.clientHeight * 1.5)); if (cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; } return cv.getContext('2d'); }
+function edDraw(){
+  const t = ED.t; if (!t || $('editor').hidden) return;
+  const dur = t.buffer.duration, T = edT();
+  // vue d'ensemble
+  { const cv = $('ed-over'), g = edFit(cv), W = cv.width, H = cv.height, pk = t.peaks;
+    g.fillStyle = C.lcd; g.fillRect(0, 0, W, H);
+    g.fillStyle = 'rgba(210,251,255,.55)';
+    for (let x = 0; x < W; x++){ const i0 = Math.floor(x / W * pk.hi.length), i1 = Math.max(i0 + 1, Math.floor((x + 1) / W * pk.hi.length)); let m = 0; for (let i = i0; i < i1; i++) if (pk.hi[i] > m) m = pk.hi[i]; const h = m * H * 0.9; g.fillRect(x, (H - h) / 2, 1, h); }
+    g.fillStyle = 'rgba(32,230,232,.18)'; g.fillRect(ED.view / dur * W, 0, Math.max(2, ED.span / dur * W), H);
+    for (const k in ED_COL){ const v = ED.m[k]; if (v == null) continue; const x = v / dur * W; g.fillStyle = ED_COL[k]; g.fillRect(x - 1.5, 0, 3, H); g.font = 'bold 22px monospace'; g.fillText(ED_LBL[k], x + 4, 22); }
+    g.fillStyle = '#fff'; g.fillRect(ED.cur / dur * W - 1, 0, 2, H); }
+  // zoom, depuis le son brut
+  { const cv = $('ed-zoom'), g = edFit(cv), W = cv.width, H = cv.height, sr = t.buffer.sampleRate;
+    const L = t.buffer.getChannelData(0), R = t.buffer.numberOfChannels > 1 ? t.buffer.getChannelData(1) : L;
+    g.fillStyle = C.lcd; g.fillRect(0, 0, W, H);
+    const v0 = ED.view, sp = ED.span, px = sp / W;
+    // grille : temps fins, mesures épaisses avec leur numéro
+    const k0 = Math.ceil((v0 - ED.fb) / T);
+    for (let k = k0; ; k++){ const tb = ED.fb + k * T; if (tb > v0 + sp) break; const x = (tb - v0) / px, bar = k % 4 === 0;
+      g.fillStyle = bar ? 'rgba(255,255,255,.55)' : 'rgba(255,255,255,.16)'; g.fillRect(Math.round(x) - (bar ? 1 : 0), 0, bar ? 2 : 1, H);
+      if (bar && T / px > 18){ g.fillStyle = 'rgba(255,255,255,.75)'; g.font = '20px monospace'; g.fillText(String(k / 4 + 1), x + 4, H - 8); } }
+    // onde
+    const mid = H / 2;
+    for (let x = 0; x < W; x++){
+      const a = Math.floor((v0 + x * px) * sr), b = Math.floor((v0 + (x + 1) * px) * sr); if (b <= 0 || a >= L.length) continue;
+      let mn = 0, mx = 0; const step = Math.max(1, Math.floor((b - a) / 200));
+      for (let i = Math.max(0, a); i < Math.min(L.length, b + 1); i += step){ const v = (L[i] + R[i]) * 0.5; if (v < mn) mn = v; if (v > mx) mx = v; }
+      g.fillStyle = 'rgba(210,251,255,.85)'; g.fillRect(x, mid - mx * mid * 0.92, 1, Math.max(1, (mx - mn) * mid * 0.92));
+    }
+    for (const k in ED_COL){ const v = ED.m[k]; if (v == null || v < v0 || v > v0 + sp) continue; const x = (v - v0) / px;
+      g.fillStyle = ED_COL[k]; g.fillRect(x - 2, 0, 4, H); g.font = 'bold 28px monospace'; g.fillText(ED_LBL[k], x + 6, 32); }
+    g.fillStyle = '#fff'; g.fillRect((ED.cur - v0) / px - 1.5, 0, 3, H);
+    if (ED.src){ const p = ED.srcOff + (ctx.currentTime - ED.srcT0); g.fillStyle = '#ffb13d'; g.fillRect((p - v0) / px - 1, 0, 2, H); } }
+  $('ed-bpm').textContent = ED.bpm.toFixed(2);
+  const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
+  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? 'auto' : 'mesure ' + edBarNo(ED.m.cut)}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
+}
+function edStop(){ if (ED.src){ try { ED.src.stop(); } catch(e){} ED.src = null; } cancelAnimationFrame(ED.raf); $('ed-play').classList.remove('on'); $('ed-play').textContent = '▶ Écouter'; edDraw(); }
+function edPlay(){
+  if (ED.src){ edStop(); return; }
+  const live = Object.values(decks).some(d => d.playing);
+  if (live && route === 'normal'){ toast('Un son joue sur l\'enceinte : passe la sortie casque en « Câble séparateur » ou « Casque seul » pour écouter ici sans que le public l\'entende.'); return; }
+  const s = ctx.createBufferSource(); s.buffer = ED.t.buffer; s.connect(live ? cueBus : masterBus);
+  const when = ctx.currentTime + 0.05; s.start(when, Math.max(0, ED.cur)); ED.src = s; ED.srcT0 = when; ED.srcOff = Math.max(0, ED.cur);
+  s.onended = () => { if (ED.src === s) edStop(); };
+  $('ed-play').classList.add('on'); $('ed-play').textContent = '■ Stop';
+  const loop = () => { if (!ED.src) return; if ($('editor').hidden){ edStop(); return; } const p = ED.srcOff + (ctx.currentTime - ED.srcT0); if (p > ED.view + ED.span * 0.9) ED.view = p - ED.span * 0.1; edDraw(); ED.raf = requestAnimationFrame(loop); };
+  ED.raf = requestAnimationFrame(loop);
+}
+// Pointeur sur le zoom : toucher = curseur, glisser = se déplacer
+{ const cv = $('ed-zoom'); let dn = null;
+  cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); dn = {x: e.clientX, v: ED.view, moved: false}; });
+  cv.addEventListener('pointermove', e => { if (!dn) return; const r = cv.getBoundingClientRect(), dx = e.clientX - dn.x; if (Math.abs(dx) > 6) dn.moved = true; if (dn.moved){ ED.view = clamp(dn.v - dx / r.width * ED.span, -ED.span / 2, ED.t.buffer.duration - ED.span / 2); edDraw(); } });
+  cv.addEventListener('pointerup', e => { if (!dn) return; if (!dn.moved){ const r = cv.getBoundingClientRect(); ED.cur = ED.view + (e.clientX - r.left) / r.width * ED.span; if (ED.src){ edStop(); edPlay(); } edDraw(); } dn = null; });
+  $('ed-over').addEventListener('click', e => { const r = e.currentTarget.getBoundingClientRect(); ED.cur = (e.clientX - r.left) / r.width * ED.t.buffer.duration; ED.view = Math.max(0, ED.cur - ED.span / 3); edDraw(); });
+}
+document.addEventListener('click', e => {
+  const o = e.target.closest('[data-ed]'); if (o){ openEditor(decks[o.dataset.ed]); return; }
+  if (!ED.t || $('editor').hidden) return;
+  const b = e.target.closest('[data-bpm],[data-bpmx],[data-gs],[data-em]'); if (!b) return;
+  if (b.dataset.bpm) ED.bpm = Math.round((ED.bpm + parseFloat(b.dataset.bpm)) * 100) / 100;
+  else if (b.dataset.bpmx) ED.bpm = Math.round(ED.bpm * parseFloat(b.dataset.bpmx) * 100) / 100;
+  else if (b.dataset.gs){ const d = parseFloat(b.dataset.gs); ED.fb += d; ED.m.kick = ED.fb; }
+  else { const k = b.dataset.em;
+    if (k === 'kick'){ ED.fb = ED.cur; ED.m.kick = ED.cur; }   // K exactement au curseur : la grille part d'ici
+    else if (k === 'cutx') ED.m.cut = null;
+    else ED.m[k] = edSnapBar(ED.cur); }
+  edDraw();
+});
+$('ed-zin').addEventListener('click', () => { if (ED.span > 0.3){ const c = ED.cur; ED.span /= 2; ED.view = c - ED.span / 3; edDraw(); } });
+$('ed-zout').addEventListener('click', () => { if (ED.span < 200){ const c = ED.cur; ED.span *= 2; ED.view = Math.max(-ED.span / 2, c - ED.span / 3); edDraw(); } });
+$('ed-play').addEventListener('click', edPlay);
+$('ed-close').addEventListener('click', () => { edStop(); $('editor').hidden = true; });
+$('ed-auto').addEventListener('click', () => {
+  const t = ED.t; ED.bpm = t.autoBpm || t.bpm; ED.fb = t.autoFb ?? t.firstBeat;
+  const keep = {bpm: t.bpm, fb: t.firstBeat, m: t.markers, st: t.struct, mg: t.manualGrid};
+  t.markers = {}; t.manualGrid = false; t.bpm = ED.bpm; t.firstBeat = t.start = ED.fb; t.struct = null; t.barE = null; t.barR = null;
+  const st = structureOf(t);
+  ED.m = {kick: ED.fb, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: null};
+  Object.assign(t, {bpm: keep.bpm, firstBeat: keep.fb, start: keep.fb, markers: keep.m, struct: keep.st, manualGrid: keep.mg}); t.barE = null; t.barR = null;
+  toast('Valeurs de l\'analyse automatique remises : touche « Enregistrer » pour les garder.'); edDraw();
+});
+$('ed-save').addEventListener('click', () => {
+  const t = ED.t, d = ED.d; edStop();
+  t.bpm = ED.bpm; t.firstBeat = t.start = ED.fb; t.manualGrid = true;
+  t.markers = {bpm: ED.bpm, grid: ED.fb, kick: ED.fb, bass: ED.m.bass, bass2: ED.m.bass2, out: ED.m.out};
+  if (ED.m.cut != null) t.markers.cut = ED.m.cut;
+  t.struct = null; t.barE = null; t.barR = null; structureOf(t);
+  for (const x of Object.values(decks)) if (x.item === t){ x.bpm = t.bpm; x.firstBeat = t.firstBeat; x.overDirty = true; }
+  if (t.id) saveTrack(t);
+  if (plan && !plan.scheduled){ plan = null; replanIfNeeded(); }
+  $('editor').hidden = true;
+  toast(`Réglages enregistrés pour « ${t.name} » : ${t.bpm.toFixed(2)} BPM, grille et marqueurs gardés pour la prochaine fois.`, 4200);
+});
+addEventListener('resize', () => { if (!$('editor').hidden) edDraw(); });
 function autoTick(){
   autoSyncIdle(decks.A); autoSyncIdle(decks.B);
   if (waitFree && !waitFree.free.playing){ const w = waitFree; waitFree = null; if (auto) queueNext(w.cur, w.free); }
@@ -2146,7 +2298,9 @@ async function loadItem(i, deckId){
     if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
       const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
       // K posé à la main : il choisit QUEL kick est le départ, mais reste collé pile sur la grille mesurée
-      if (t.markers && t.markers.kick != null){ const bl = 60 / t.bpm; t.firstBeat = t.start = t.firstBeat + Math.round((t.markers.kick - t.firstBeat) / bl) * bl; } }
+      t.autoBpm = t.bpm; t.autoFb = t.firstBeat;
+      if (t.markers && t.markers.bpm){ t.bpm = t.markers.bpm; t.firstBeat = t.start = t.markers.grid ?? t.firstBeat; t.manualGrid = true; }   // grille réglée à la main dans l'éditeur
+      else if (t.markers && t.markers.kick != null){ const bl = 60 / t.bpm; t.firstBeat = t.start = t.firstBeat + Math.round((t.markers.kick - t.firstBeat) / bl) * bl; } }
     d.load(t);
     autoSyncIdle(d);
     d.ctl.lo.set(0); d.ctl.filt.set(0);
@@ -2460,7 +2614,7 @@ function kickFit(buf, fb, beat){
 // Grille LOCALE : écart (s) entre les vrais kicks autour de « at » et la grille du morceau.
 // Utile pour les versions clip / montées (coupes qui décalent la grille) : on cale le lancement sur les kicks réels de cet endroit.
 function localShift(t, at){
-  const k = t.fitInfo && t.fitInfo.kicks; if (!k || !k.length) return null;
+  const k = !t.manualGrid && t.fitInfo && t.fitInfo.kicks; if (!k || !k.length) return null;
   const T = 60 / t.bpm, fb = t.firstBeat, res = [];
   for (const x of k){ if (x < at - 8 * T || x > at + 16 * T) continue; let r = (x - fb) / T; r = (r - Math.round(r)) * T; res.push(r); }
   if (res.length < 8) return null;

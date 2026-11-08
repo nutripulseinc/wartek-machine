@@ -966,7 +966,7 @@ function barRms(t){
 function structureOf(t){
   if (t.struct) return t.struct;
   const e = barEnergy(t), r = barRms(t), nb = e.length, bar = 240 / t.bpm, m = t.markers || {};
-  const sorted = [...e].sort((a, b) => a - b), ref = sorted[Math.floor(nb * 0.75)] || 0, thr = 0.45 * ref;
+  const sorted = [...e].sort((a, b) => a - b), ref = sorted[Math.floor(nb * 0.75)] || 0, flo0 = sorted[Math.floor(nb * 0.1)] || 0, flo = ref - flo0 > 0.25 * ref ? flo0 : 0, thr = flo + 0.4 * (ref - flo);   // au-dessus de la traîne des kicks seuls
   let bi = e.findIndex((v, i) => v >= thr && (e[i + 1] ?? v) >= thr); if (bi < 0) bi = 0;
   let bo = nb; for (let i = nb - 1; i > bi; i--) if (e[i] >= thr && (e[i - 1] ?? e[i]) >= thr){ bo = i + 1; break; }
   const mx = a => Math.max(1e-9, ...a), em = mx(e), rm = mx(r), x = e.map((v, i) => v / em + r[i] / rm);
@@ -992,11 +992,23 @@ function structureOf(t){
   // Grosse basse : basses fortes ET son plein (le gros pic de la wave). B1 et B2 sont recalés dessus,
   // pour ne pas tomber sur une pré-basse ou une montée plus légère.
   { const rs = [...r].sort((a, b) => a - b), rRef = rs[Math.floor(nb * 0.75)] || 0;
-    const big = i => i >= 0 && i < nb && e[i] >= 0.72 * ref && r[i] >= 0.8 * rRef;
+    const big = i => i >= 0 && i < nb && e[i] >= flo + 0.68 * (ref - flo) && r[i] >= 0.8 * rRef;
     const big2 = i => big(i) && big(i + 1);
     const refine = (from, to) => { for (let i = from; i <= to && i < nb - 1; i++) if (big2(i)){ const r4 = Math.round(i / 4) * 4; return Math.abs(i - r4) <= 1 && big(r4) ? r4 : i; } return from; };
     if (m.bass == null && !big2(bi)) bi = refine(bi, Math.min(bo - 2, bi + 16));
-    if (b2 != null && !big2(b2)){ const nb2 = refine(b2, Math.min(bo - 2, b2 + 16)); if (nb2 > bi + 4) b2 = nb2; } }
+    if (b2 != null && !big2(b2)){ const nb2 = refine(b2, Math.min(bo - 2, b2 + 16)); if (nb2 > bi + 4) b2 = nb2; }
+    // Bord exact de la ligne de basse, à la mesure près et SANS arrondi aux 4 mesures (sinon une mesure d'avance ou de retard) :
+    // niveau de la basse sur les 8 mesures qui suivent, puis 1re mesure qui l'atteint juste après une mesure qui ne l'atteint pas.
+    // = la mesure où la basse fait son plus gros saut (moyenne des 2 mesures après − des 2 avant), autour du point trouvé
+    const ev = i => i >= 0 && i < nb ? e[i] : 0;
+    const edge = c => {
+      let best = c, bs = -Infinity;
+      for (let k = Math.max(1, c - 3); k <= Math.min(nb - 2, c + 3); k++){ const j = (ev(k) + ev(k + 1)) - (ev(k - 1) + ev(k - 2)); if (j > bs + 1e-9){ bs = j; best = k; } }
+      return bs > 0.2 * (ref - flo) ? best : c;
+    };
+    if (m.bass == null && bi > 0) bi = edge(bi);
+    if (b2 != null){ const e2 = edge(b2); if (e2 > bi + 4) b2 = e2; }
+    if (m.out == null && bo < nb){ let best = bo, bs = -Infinity; for (let k = Math.max(bi + 2, bo - 3); k <= Math.min(nb - 1, bo + 3); k++){ const j = (ev(k - 1) + ev(k - 2)) - (ev(k) + ev(k + 1)); if (j > bs + 1e-9){ bs = j; best = k; } } if (bs > 0.2 * (ref - flo)) bo = best; } }
   if (m.bass2 != null) b2 = Math.max(bi, Math.round((m.bass2 - t.firstBeat) / bar));
   t.struct = {drop: t.firstBeat + bi * bar, outro: t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph,
               lastBass: b2 == null ? null : t.firstBeat + b2 * bar, lastBar: b2};
@@ -2306,6 +2318,7 @@ function kickLag(o, n, aStart, bStart, rA, rB, t1, t2, beat){
 }
 function preAlign(o, n, plan){
   if (!plan.synced) return null;
+  if (o.item.fitInfo && n.item.fitInfo) return null;   // grilles mesurées au millième sur les kicks : le lancement sur la grille est déjà exact
   const rA = o.rate, rB = plan.rate, beat = o.beatLen / rA, I = plan.Lp;
   const span = Math.min(16, Math.max(8, I || 16)) * beat;
   const lag1 = kickLag(o, n, plan.oldStart, plan.bStart, rA, rB, 0, span, beat);
@@ -2325,17 +2338,26 @@ function phaseLock(){
   const now = ctx.currentTime; if (now - lastLock < 1) return; lastLock = now;
   const A = decks.A, B = decks.B;
   if (!A.playing || !B.playing || !A.item || !B.item || A.nudging || B.nudging) return;
-  const since = now - Math.max(A.t0, B.t0, A.nudgeEnd || 0, B.nudgeEnd || 0);   // fenêtre sans coup de pitch
-  if (since < 0.6) return;
+  if (now - Math.max(A.t0, B.t0) < 0) return;
   if (Math.abs(A.bpm * A.rate - B.bpm * B.rate) > 0.08) return;
   const master = plan && plan.scheduled ? plan.o : (A.t0 <= B.t0 ? A : B), slave = other(master);
-  const beat = 60 / (master.bpm * master.rate), W = Math.min(8 * beat, since - 0.05), step = 0.001;
-  const N = Math.floor(W / step), L = Math.floor(0.2 * beat / step); if (N < 200) return;
-  const pm = master.pos(), ps = slave.pos(), a = new Float32Array(N), bx = new Float32Array(N + 2 * L);
-  for (let k = 0; k < N; k++){ const back = (N - k) * step; a[k] = onsetAt(master.item, pm - back * master.rate); }
-  for (let k = -L; k < N + L; k++){ const back = (N - k) * step; bx[k + L] = onsetAt(slave.item, ps - back * slave.rate); }
-  const late = xcorrLag(a, bx, L, step);   // > 0 : le son qui entre est en retard
-  if (late == null){ lockInfo = {t: now, txt: 'CALAGE ?'}; return; }
+  const beat = 60 / (master.bpm * master.rate);
+  let late;
+  if (master.item.fitInfo && slave.item.fitInfo){
+    // Beat Sync : les deux grilles sont justes, on compare leurs temps directement
+    const pm = mod((master.pos() - master.firstBeat) / master.beatLen, 1), ps = mod((slave.pos() - slave.firstBeat) / slave.beatLen, 1);
+    let d = pm - ps; if (d > 0.5) d -= 1; if (d < -0.5) d += 1;
+    if (Math.abs(d) > 0.25) return;   // décalé exprès d'un demi-temps : on n'y touche pas
+    late = d * beat;
+  } else {
+    const since = now - Math.max(A.t0, B.t0, A.nudgeEnd || 0, B.nudgeEnd || 0); if (since < 0.6) return;
+    const W = Math.min(8 * beat, since - 0.05), step = 0.001, N = Math.floor(W / step), L = Math.floor(0.2 * beat / step); if (N < 200) return;
+    const pm = master.pos(), ps = slave.pos(), a = new Float32Array(N), bx = new Float32Array(N + 2 * L);
+    for (let k = 0; k < N; k++){ const back = (N - k) * step; a[k] = onsetAt(master.item, pm - back * master.rate); }
+    for (let k = -L; k < N + L; k++){ const back = (N - k) * step; bx[k + L] = onsetAt(slave.item, ps - back * slave.rate); }
+    late = xcorrLag(a, bx, L, step);
+    if (late == null){ lockInfo = {t: now, txt: 'CALAGE ?'}; return; }
+  }
   if (Math.abs(late) < 0.003){ lockInfo = {t: now, txt: 'CALÉ ✓'}; return; }
   // Si le son se décale toujours dans le même sens, son tempo n'est pas tout à fait le bon : on corrige aussi le pitch de base
   let f = 1; const lc = slave.lastCorr;

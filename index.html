@@ -1768,8 +1768,18 @@ function startTransition(dt){
   const fix = preAlign(plan.o, plan.n, plan);   // calcul fait AVANT de lire l'horloge : il ne retarde pas le départ
   if (fix){ plan.bStart += fix.lag * plan.rate; plan.preFix = fix; }
   // Grilles locales à l'endroit exact du lancement (K2 de A, K de B)
-  { const dA = localShift(plan.o.item, plan.oldStart), dB = localShift(plan.n.item, plan.bStart);
-    if (dA){ plan.oldStart += dA; plan.P += dA; plan.cut += dA; } if (dB) plan.bStart += dB; plan.local = {A_ms: Math.round(dA * 1000), B_ms: Math.round(dB * 1000)}; }
+  // Priorité au moment des basses (B2 de A / B1 de B) : c'est là que l'oreille juge le calage.
+  // Si les kicks de l'intro sont un peu décalés par rapport à ceux du drop (autre kick, montage), on cale sur le drop.
+  { const o = plan.o, n = plan.n, bDrop = plan.bStart + plan.Lp * n.beatLen;
+    const aK = localShift(o.item, plan.oldStart), bK = localShift(n.item, plan.bStart), aD = localShift(o.item, plan.P), bD = localShift(n.item, bDrop);
+    const dA = aD ?? aK ?? 0, dB = bD ?? bK ?? 0;
+    if (dA){ plan.oldStart += dA; plan.P += dA; plan.cut += dA; } if (dB) plan.bStart += dB;
+    const ms = v => v == null ? null : Math.round(v * 1000);
+    plan.local = {A_K: ms(aK), B_K: ms(bK), A_basse: ms(aD), B_basse: ms(bD)};
+    // l'intro et le drop ne sont pas calés pareil : l'oreille ne corrige pas (elle tirerait vers l'intro)
+    // dès que les kicks du drop sont mesurés des deux côtés, c'est eux qui décident : l'oreille ne corrige plus l'intro
+    // écart attendu dans l'intro quand le drop est calé pile (kicks de l'intro un peu différents de ceux du drop)
+    plan.expIntro = (aD != null && bD != null) ? ((aK != null && bK != null) ? (bK - bD) - (aK - aD) : null) : 0; }
   dt = (plan.oldStart - plan.o.pos()) / plan.o.rate;
   const {o, n} = plan, now = ctx.currentTime, T0 = now + Math.max(LEAD(), dt), beat = o.beatLen / o.rate, L = plan.Lp;
   // Si on est en retard sur K2, B démarre un peu plus loin dans son morceau : son K reste collé au K2 de A
@@ -1909,10 +1919,12 @@ function earCheck(plan, now){
   const free = now - Math.max(plan.T0, n.nudgeEnd || 0, o.nudgeEnd || 0);   // secondes écoutées depuis le dernier réglage
   if (n.nudging || o.nudging || free < 2.2 || now - (plan.earT || 0) < 1) return;
   plan.earT = now;
-  const lag = earLag(n, Math.min(6, free - 0.3), beat);
+  let lag = earLag(n, Math.min(6, free - 0.3), beat);
   if (lag == null){ lockInfo = {t: now, txt: 'OREILLE ?'}; return; }
+  const exp = plan.expIntro; if (exp == null){ (plan.earLog = plan.earLog || []).push(Math.round(lag * 1000)); lockInfo = {t: now, txt: `CALÉ SUR LE DROP · intro ${Math.round(lag * 1000)} ms`}; return; }
+  (plan.earLog = plan.earLog || []).push(Math.round(lag * 1000));   // écart brut entendu
+  lag -= exp;   // on ne corrige que l'écart qui n'est pas « voulu » par le calage du drop
   const prev = plan.earLast; plan.earLast = lag;
-  (plan.earLog = plan.earLog || []).push(Math.round(lag * 1000));
   if (Math.abs(lag) < 0.004){ lockInfo = {t: now, txt: 'CALÉ À L\'OREILLE ✓'}; return; }
   // On ne corrige que si deux écoutes de suite donnent le même écart (à 3 ms près) : pas de coup de pitch sur une fausse mesure
   if (prev == null || Math.abs(prev - lag) > 0.003){ lockInfo = {t: now, txt: `ÉCOUTE… ${Math.round(lag * 1000)} ms`}; return; }
@@ -2388,8 +2400,14 @@ function kickFit(buf, fb, beat){
   // droite robuste : seulement les attaques franches, puis on retire les points loin de la droite
   const robust = (P, keep) => {
     const pk = [...P].map(p => p.pk).sort((x, y) => x - y)[Math.floor(P.length * 0.5)];
-    let g = P.filter(p => p.pk >= 0.6 * pk); if (g.length < 6) return null;
-    let f = fit(g);
+    let g = P.filter(p => p.pk >= 0.35 * pk); if (g.length < 6) return null;
+    // départ insensible aux coupes : pente = médiane des pentes entre kicks proches (16 à 32 temps d'écart),
+    // calage = médiane des écarts → la droite se pose sur la plus grande partie cohérente, pas sur un compromis
+    const sl = []; for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length && g[j].b - g[i].b <= 32; j++) if (g[j].b - g[i].b >= 16){ sl.push((g[j].t - g[i].t) / (g[j].b - g[i].b)); if (sl.length > 4000) break; }
+    let f;
+    if (sl.length >= 5){ sl.sort((x, y) => x - y); const T = sl[Math.floor(sl.length / 2)]; const cs = g.map(p => p.t - p.b * T).sort((x, y) => x - y); f = {c: cs[Math.floor(cs.length / 2)], T, rms: 0}; }
+    else f = fit(g);
+    { const g2 = g.filter(p => Math.abs(p.t - f.c - p.b * f.T) <= 0.004); if (g2.length >= Math.max(6, 0.2 * g.length)){ g = g2; f = fit(g); } }
     for (let it = 0; it < 6; it++){ const res = g.map(p => Math.abs(p.t - f.c - p.b * f.T)).sort((x, y) => x - y), mad = res[Math.floor(res.length / 2)]; const lim = Math.max(0.003, 3 * mad); /* écart médian : insensible aux faux kicks */ const g2 = g.filter(p => Math.abs(p.t - f.c - p.b * f.T) <= lim); if (g2.length < Math.max(6, 0.3 * g.length)) break; g = g2; f = fit(g); }
     if (keep) keep.g = g; return f;
   };
@@ -2406,7 +2424,7 @@ function kickFit(buf, fb, beat){
     if (pts.length < 24) return null;
     const kp = {}, f = robust(pts, kp); if (!f || kp.g.length < 16) return null;
     let sc = 0; for (const p of kp.g) sc += p.pk;
-    return {f, g: kp.g, pts, score: sc / (1 + f.rms * 1000)};
+    return {f, g: kp.g, pts, score: sc / (1 + f.rms * 1000)};   // somme des attaques qui tombent sur la grille
   };
   let bestT = null;
   for (let q = 0; q < 4; q++){ const r = track(fb + q * beat / 4); if (r){ r.score *= q === 0 ? 1.6 : 1; if (!bestT || r.score > bestT.score) bestT = r; } }   // le calage de l'analyse garde un petit avantage
@@ -2436,19 +2454,20 @@ function kickFit(buf, fb, beat){
   if (Math.abs(bpm - Math.round(bpm)) <= 0.08){ bpm = Math.round(bpm); f = refit(60 / bpm); }
   else if (Math.abs(bpm * 2 - Math.round(bpm * 2)) <= 0.08){ bpm = Math.round(bpm * 2) / 2; f = refit(60 / bpm); }
   const pkm = bestT.pts.map(p => p.pk).sort((x, y) => x - y)[Math.floor(bestT.pts.length / 2)];
-  const kicks = Float64Array.from(bestT.pts.filter(p => p.pk >= 0.6 * pkm).map(p => p.t));   // toutes les attaques franches, pour la grille locale
+  const kicks = Float64Array.from(bestT.pts.filter(p => p.pk >= 0.35 * pkm).map(p => p.t));   // toutes les attaques franches, pour la grille locale
   return {fb: f.c, bpm: Math.round(bpm * 1000) / 1000, rms: f.rms, n: g.length, kicks};
 }
 // Grille LOCALE : écart (s) entre les vrais kicks autour de « at » et la grille du morceau.
 // Utile pour les versions clip / montées (coupes qui décalent la grille) : on cale le lancement sur les kicks réels de cet endroit.
 function localShift(t, at){
-  const k = t.fitInfo && t.fitInfo.kicks; if (!k || !k.length) return 0;
+  const k = t.fitInfo && t.fitInfo.kicks; if (!k || !k.length) return null;
   const T = 60 / t.bpm, fb = t.firstBeat, res = [];
   for (const x of k){ if (x < at - 8 * T || x > at + 16 * T) continue; let r = (x - fb) / T; r = (r - Math.round(r)) * T; res.push(r); }
-  if (res.length < 8) return 0;
+  if (res.length < 8) return null;
   res.sort((a, b) => a - b); const med = res[Math.floor(res.length / 2)];
   const mad = res.map(r => Math.abs(r - med)).sort((a, b) => a - b)[Math.floor(res.length / 2)];
-  if (mad > 0.006 || Math.abs(med) < 0.0015 || Math.abs(med) > 0.45 * T) return 0;
+  if (mad > 0.006 || Math.abs(med) > 0.45 * T) return null;
+  if (Math.abs(med) < 0.0015) return 0;
   return med;
 }
 function kickLag(o, n, aStart, bStart, rA, rB, t1, t2, beat){

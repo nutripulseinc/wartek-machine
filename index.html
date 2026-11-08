@@ -1211,7 +1211,7 @@ class Deck {
   // Petit coup de pitch pour rattraper un décalage (en secondes), puis retour au tempo, tout sur l'horloge audio
   nudge(shift, T = 0.8, f = 1){
     if (!this.playing || this.nudging || !this.src) return;
-    const base = this.rate, nb = base * f, fast = base * (1 + shift / T), src = this.src; this.nudging = true;
+    const base = this.rate, nb = base * f, fast = base * (1 + shift / T), src = this.src; this.nudging = true; this.nudgeBase = nb;
     const tS = this.setRate(fast), tEnd = tS + T;
     src.playbackRate.setValueAtTime(nb, tEnd);
     setTimeout(() => {
@@ -1548,6 +1548,12 @@ function smartStart(d){
   if (!alignHintShown){ alignHintShown = true; toast(canSync ? `Calé sur la mesure de la platine ${o.id} : départ barre sur barre.` : `Tempos trop éloignés : départ sur la mesure de la platine ${o.id}, sans changer le tempo.`); }
 }
 const tempoRatio = (o, n) => [o.bpm * o.rate, o.bpm * o.rate * 2, o.bpm * o.rate / 2].map(t => t / n.bpm).reduce((a, b) => Math.abs(b - 1) < Math.abs(a - 1) ? b : a);
+// Le son chargé prend tout de suite exactement le BPM de celui qui joue (comme le Sync d'une Pioneer)
+function autoSyncIdle(d){
+  const o = other(d);
+  if (d.playing || !d.buffer || !d.bpm || !o.playing || !o.bpm) return;
+  const r = tempoRatio(o, d); if (Math.abs(r - 1) <= 0.16 && Math.abs(d.rate - r) > 1e-9) d.setRate(r);
+}
 function syncDeck(d){
   const o = other(d);
   if (!d.buffer || !o.buffer || !d.bpm || !o.bpm){ toast('Charge un morceau sur les deux platines pour synchroniser.'); return; }
@@ -1738,7 +1744,7 @@ function schedule(d, key, v, t, tc){ plan.events.push({d, key, v, t, tc}); }
 function startTransition(dt){
   if (plan.synced) plan.rate = tempoRatio(plan.o, plan.n);   // tempo de A à cet instant précis
   const fix = preAlign(plan.o, plan.n, plan);   // calcul fait AVANT de lire l'horloge : il ne retarde pas le départ
-  if (fix){ plan.rate *= fix.f; plan.bStart += fix.lag * plan.rate; plan.preFix = fix; }
+  if (fix){ plan.bStart += fix.lag * plan.rate; plan.preFix = fix; }
   dt = (plan.oldStart - plan.o.pos()) / plan.o.rate;
   const {o, n} = plan, now = ctx.currentTime, T0 = now + Math.max(LEAD(), dt), beat = o.beatLen / o.rate, L = plan.Lp;
   // Si on est en retard sur K2, B démarre un peu plus loin dans son morceau : son K reste collé au K2 de A
@@ -1817,7 +1823,6 @@ function finishTransition(){
   if (n.ctl.vol.value < 100) n.ctl.vol.set(100);
   if (manual){ waitFree = {cur: n, free: o}; return; }
   o.pause();
-  settleTempo(n);
   ['lo', 'mid', 'hi', 'filt'].forEach(k => o.ctl[k].set(0));
   o.ctl.vol.set(100);
   xfCtl.set(n.id === 'A' ? 0 : 100);
@@ -1825,6 +1830,7 @@ function finishTransition(){
 }
 
 function autoTick(){
+  autoSyncIdle(decks.A); autoSyncIdle(decks.B);
   if (waitFree && !waitFree.free.playing){ const w = waitFree; waitFree = null; if (auto) queueNext(w.cur, w.free); }
   if (!plan) return;
   const {o, n} = plan, now = ctx.currentTime;
@@ -2028,6 +2034,7 @@ async function loadItem(i, deckId){
       const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
       if (t.markers && t.markers.kick != null){ t.firstBeat = t.start = t.markers.kick; } }
     d.load(t);
+    autoSyncIdle(d);
     d.ctl.lo.set(0); d.ctl.filt.set(0);
     replanIfNeeded();
   } catch(err){
@@ -2332,7 +2339,6 @@ function phaseLock(){
   if (Math.abs(late) < 0.003){ lockInfo = {t: now, txt: 'CALÉ ✓'}; return; }
   // Si le son se décale toujours dans le même sens, son tempo n'est pas tout à fait le bon : on corrige aussi le pitch de base
   let f = 1; const lc = slave.lastCorr;
-  if (lc && Math.sign(lc.late) === Math.sign(late) && now - lc.t < 20) f = clamp(1 + late / (now - lc.t), 0.997, 1.003);
   slave.lastCorr = {t: now, late};
   // Coup de pitch comme un DJ : 4 % maximum, plus long si le décalage est grand
   slave.nudge(late, Math.max(0.3, Math.abs(late) / 0.04), f);
@@ -2352,7 +2358,7 @@ function frame(now){
     setText(d.ui.title, has ? d.item.name : '');
     d.ui.time.textContent = has ? '-' + fmt(d.duration - d.pos()) : '';
     setText(d.ui.fname, d.loading || (has ? d.item.name : 'Aucun morceau'));
-    setText(d.ui.bpm, d.bpm ? (d.bpm * d.rate).toFixed(2) : '—');
+    setText(d.ui.bpm, d.bpm ? (d.bpm * (d.nudging ? d.nudgeBase : d.rate)).toFixed(2) : '—');
     const o = other(d);
     d.ui.sync.classList.toggle('lit', !!(d.bpm && o.bpm && Math.abs(d.bpm * d.rate - o.bpm * o.rate) < 0.05));
     const pl = d.ui.play, on = d.playing;

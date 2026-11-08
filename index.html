@@ -81,9 +81,9 @@ button{cursor:pointer}
 
 .pbody{display:grid;grid-template-columns:minmax(0,1fr) 170px;gap:10px;padding:10px;min-height:0}
 .sec{background:linear-gradient(180deg,#27292d,#1f2124);border:1px solid #34363b;border-radius:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);min-height:0}
-.mainsec{display:grid;grid-template-rows:26px 1fr 132px;gap:6px;padding:8px 12px 10px}
+.mainsec{display:grid;grid-template-rows:26px 1fr 86px;gap:6px;padding:8px 12px 10px}
 .sechead{display:flex;justify-content:space-between;font-size:19px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;padding:0 6px}
-.loadgrid{display:grid;grid-template-columns:1fr 90px 124px;grid-template-rows:84px 1fr minmax(0,1.25fr);grid-template-areas:"scr q q" "scr s p" "ov ov ov";gap:10px;min-height:0;border-bottom:1px solid #34363b;padding-bottom:10px}
+.loadgrid{display:grid;grid-template-columns:1fr 90px 124px;grid-template-rows:84px 156px minmax(0,1fr);grid-template-areas:"scr q q" "scr s p" "ov ov ov";gap:10px;min-height:0;border-bottom:1px solid #34363b;padding-bottom:10px}
 .screens{display:contents}.screens .lcd.big{grid-area:scr}.screens .lcd.small{grid-area:ov}
 .lcd{position:relative;background:var(--lcd);border-radius:6px;border:1px solid #000;box-shadow:inset 0 0 0 2px #303338,inset 0 0 24px rgba(0,0,0,.8);min-height:0;min-width:0;overflow:hidden}
 .lcd canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
@@ -91,18 +91,20 @@ button{cursor:pointer}
 .lcdinfo{position:absolute;left:10px;right:10px;top:6px;display:flex;justify-content:space-between;gap:10px;font-family:var(--font-lcd);font-size:15px;color:var(--lcd-fg);pointer-events:none;text-shadow:0 0 6px rgba(0,0,0,.9)}
 .lcdinfo b{font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .browse{position:absolute;right:8px;bottom:8px;height:36px;padding:0 16px;border-radius:5px;border:1px solid #000;background:linear-gradient(#4a4c52,#2c2e32);box-shadow:0 0 0 1px #5a5d63;font-size:16px;font-weight:600;letter-spacing:.06em;display:grid;place-items:center;cursor:pointer}
-.fname{position:absolute;left:0;right:0;top:0;height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;font-size:15px;color:var(--fg);background:rgba(255,255,255,.04);border-bottom:1px solid #22344a;z-index:1}
+.fname{position:absolute;left:0;right:0;top:0;height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;font-size:15px;color:var(--fg);background:rgba(255,255,255,.04);border-bottom:1px solid #22344a;z-index:1}
 .fname span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .fname button{border:0;background:none;padding:0 2px;font-size:18px;color:var(--fg);line-height:1}
 .fname > span:first-child{flex:1;min-width:0}
 .fname .mk{display:flex;gap:3px;margin:0 4px;flex:none}
-.fname .mk button{font-family:var(--font-lcd);font-size:11px;height:18px;min-width:18px;padding:0 3px;border-radius:3px;border:1px solid currentColor;line-height:16px}
+.fname .mk button{font-family:var(--font-lcd);font-size:13px;height:26px;min-width:28px;padding:0 5px;margin-left:3px;border-radius:3px;border:1px solid currentColor;line-height:16px}
 .fname .mk [data-mk="kick"]{color:#20e6e8}.fname .mk [data-mk="bass"]{color:#3dffb0}.fname .mk [data-mk="bass2"]{color:#e5ff3d}.fname .mk [data-mk="out"]{color:#ff3d6e}
-.lcd.small canvas{top:24px;height:calc(100% - 24px);cursor:pointer}
+.lcd.small canvas{top:32px;height:calc(100% - 32px);cursor:pointer}
 
 .synccol,.playcol{display:grid;justify-items:center;align-content:center;gap:4px;text-align:center;min-height:0}
-.playcol .startbtn{width:92px;height:92px}
-.synccol .syncbtn{height:66px}
+.playcol .startbtn{width:106px;height:106px}
+.playcol .retour{height:38px;padding:0 16px;font-size:15px}
+.playcol .cap2{display:none}
+.synccol .syncbtn{height:84px;width:80px}
 .synccol .cap2{display:none}.synccol .cap{white-space:nowrap}
 .synccol{grid-area:s}.playcol{grid-area:p}
 .queue{grid-area:q;background:var(--lcd);border:1px solid rgba(32,230,232,.32);border-radius:6px;display:grid;grid-template-rows:28px 1fr;overflow:hidden;min-width:0;box-shadow:inset 0 0 16px rgba(32,230,232,.08)}
@@ -137,16 +139,16 @@ button{cursor:pointer}
 .startbtn:active .face{transform:scale(.97)}
 
 .pads{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;align-items:end;padding:0 4px}
-.padw{display:grid;justify-items:center;gap:6px}
+.padw{display:grid;justify-items:center;gap:4px}
 .padlbl{white-space:nowrap;max-width:100%;overflow:hidden;border:1px solid #3a3c41;background:#2a2c30;padding:2px 7px;border-radius:5px;font-size:15px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;display:flex;gap:6px;align-items:center;color:var(--fg);touch-action:manipulation}
 .padlbl svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .padlbl.custom{border-color:var(--blue);color:#bcd9ff}
 .lcd.big.nofile{cursor:pointer}
-.pad{width:96px;height:96px;border-radius:8px;border:2px solid #0a0b0d;position:relative;padding:0;touch-action:none;
+.pad{width:100%;max-width:150px;height:58px;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:8px;border:2px solid #0a0b0d;position:relative;padding:0;touch-action:none;
   background:radial-gradient(circle at 50% 40%,color-mix(in srgb,var(--pc) 85%,#fff 15%),var(--pc) 55%,color-mix(in srgb,var(--pc) 60%,#000));
   box-shadow:0 0 0 3px color-mix(in srgb,var(--pc) 35%,#000),0 0 14px color-mix(in srgb,var(--pc) 45%,transparent),inset 0 2px 6px rgba(255,255,255,.3);
   display:grid;place-items:center;align-content:center;gap:2px;color:#1a0a0a}
-.pad svg{width:34px;height:34px;fill:currentColor}
+.pad svg{width:26px;height:26px;fill:currentColor}
 .pad small{font-size:13px;font-weight:700;letter-spacing:.04em;max-width:84px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pad.hit{box-shadow:0 0 0 3px #fff,0 0 30px var(--pc),inset 0 2px 6px rgba(255,255,255,.5);filter:brightness(1.25)}
 
@@ -233,11 +235,11 @@ button{cursor:pointer}
 .dlist .n{font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dlist .m{font-family:var(--font-lcd);font-size:14px;color:var(--mute)}
 .dlist .dbtn{padding:0}
-.fname .mk .edopen{color:#fff;border-color:#fff;padding:0 6px;margin-right:2px;font-weight:700}
+.fname .mk .edopen{color:#fff;border-color:#fff;padding:0 10px;margin:0 4px 0 8px;font-weight:700;background:rgba(255,255,255,.08)}
 .edpanel{width:1570px;height:726px;max-height:none}
 .edbody{display:grid;grid-template-rows:120px 1fr auto auto;gap:10px;padding:12px 16px;min-height:0}
 .edbody canvas{display:block;width:100%;height:100%;border-radius:6px;background:var(--lcd)}
-#ed-over{cursor:pointer}
+#ed-over{cursor:pointer;touch-action:none}
 .edzoomw{position:relative;min-height:0}.edzoomw canvas{position:absolute;inset:0;touch-action:none;cursor:crosshair}
 .edbar{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
 .edgrp{display:flex;align-items:center;gap:6px}
@@ -663,7 +665,7 @@ body[data-skin="psy"] .bline{background:linear-gradient(90deg,transparent,#3dffb
           <div class="edgrp"><span class="edlbl">BPM précis</span><button id="ed-measure" title="Place le curseur sur un kick loin du K (fin du morceau) puis touche ici">Mesurer K → curseur</button></div>
         </div>
         <div class="edbar">
-          <div class="edgrp"><span class="edlbl">Poser au curseur</span><button data-em="kick" class="mk-k">K</button><button data-em="bass" class="mk-b1">B1</button><button data-em="bass2" class="mk-b2">B2</button><button data-em="out" class="mk-f">F</button><button data-em="cut" class="mk-c">C</button><button data-em="cutx" title="Enlever C">C ✕</button></div>
+          <div class="edgrp"><span class="edlbl">Poser au curseur</span><button data-em="kick" class="mk-k">K</button><button data-em="bass" class="mk-b1">B1</button><button data-em="bass2" class="mk-b2">B2</button><button data-em="out" class="mk-f">F</button><button data-em="cut" class="mk-c">C</button><button data-em="cutx" title="Enlever C">C ✕</button><button id="ed-free" class="edtog" aria-pressed="false" title="Libre : C exactement au curseur, B1/B2/F sur le temps le plus proche (au lieu de la mesure), K sans aimant">Mode libre</button></div>
           <span id="ed-info" class="edinfo"></span>
         </div>
       </div>
@@ -1058,8 +1060,9 @@ function structureOf(t){
     if (b2 != null){ const e2 = edge(b2); if (e2 > bi + 4) b2 = e2; }
     if (m.out == null && bo < nb){ let best = bo, bs = -Infinity; for (let k = Math.max(bi + 2, bo - 3); k <= Math.min(nb - 1, bo + 3); k++){ const j = (ev(k - 1) + ev(k - 2)) - (ev(k) + ev(k + 1)); if (j > bs + 1e-9){ bs = j; best = k; } } if (bs > 0.2 * (ref - flo)) bo = best; } }
   if (m.bass2 != null) b2 = Math.max(bi, Math.round((m.bass2 - t.firstBeat) / bar));
-  t.struct = {drop: t.firstBeat + bi * bar, outro: t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph,
-              lastBass: b2 == null ? null : t.firstBeat + b2 * bar, lastBar: b2};
+  const bl = bar / 4, onBeat = x => t.firstBeat + Math.round((x - t.firstBeat) / bl) * bl;
+  t.struct = {drop: m.bass != null ? onBeat(m.bass) : t.firstBeat + bi * bar, outro: m.out != null ? onBeat(m.out) : t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph,
+              lastBass: b2 == null ? null : (m.bass2 != null ? onBeat(m.bass2) : t.firstBeat + b2 * bar), lastBar: b2};
   return t.struct;
 }
 
@@ -1763,7 +1766,7 @@ function makePlan(o, n){
     for (let k = 2; k <= postBars && dBar + k + 1 < eB.length; k++){ if (eB[dBar + k] < 0.4 * refE && eB[dBar + k + 1] < 0.4 * refE){ cutBar = k; break; } }
     cutBars = cutBar || Math.min(16, roomBars);
   }
-  { const mc = o.item.markers && o.item.markers.cut; if (mc != null){ const cb = Math.round((mc - P) / (4 * ob)); if (cb >= 1){ cutBars = Math.min(cb, roomBars); cutBar = null; } } }   // C posé dans l'éditeur
+  { const mc = o.item.markers && o.item.markers.cut; if (mc != null){ const cb = (mc - P) / (4 * ob); if (cb >= 0.25){ cutBars = Math.min(cb, roomBars); cutBar = null; } } }   // C posé à la main : à l'endroit exact   // C posé dans l'éditeur
   return {o, n, rate: r, synced, useB2, why, cutBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + cutBars * 4 + 8, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
@@ -2030,7 +2033,7 @@ function edDraw(){
     if (ED.src){ const p = ED.srcOff + (ctx.currentTime - ED.srcT0); g.fillStyle = '#ffb13d'; g.fillRect((p - v0) / px - 1, 0, 2, H); } }
   $('ed-bpm').textContent = ED.bpm.toFixed(2);
   const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
-  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? 'auto' : 'mesure ' + edBarNo(ED.m.cut)}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
+  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? 'auto' : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
 }
 function edStop(){ if (ED.src){ try { ED.src.stop(); } catch(e){} ED.src = null; } cancelAnimationFrame(ED.raf); $('ed-play').classList.remove('on'); $('ed-play').textContent = '▶ Écouter'; edDraw(); }
 function edPlay(){
@@ -2056,7 +2059,13 @@ function edPlay(){
   cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); dn = {x: e.clientX, v: ED.view, moved: false}; });
   cv.addEventListener('pointermove', e => { if (!dn) return; const r = cv.getBoundingClientRect(), dx = e.clientX - dn.x; if (Math.abs(dx) > 6) dn.moved = true; if (dn.moved){ ED.view = clamp(dn.v - dx / r.width * ED.span, -ED.span / 2, ED.t.buffer.duration - ED.span / 2); edDraw(); } });
   cv.addEventListener('pointerup', e => { if (!dn) return; if (!dn.moved){ const r = cv.getBoundingClientRect(); ED.cur = ED.view + (e.clientX - r.left) / r.width * ED.span; if (ED.src){ edStop(); edPlay(); } edDraw(); } dn = null; });
-  $('ed-over').addEventListener('click', e => { const r = e.currentTarget.getBoundingClientRect(); ED.cur = (e.clientX - r.left) / r.width * ED.t.buffer.duration; ED.view = Math.max(0, ED.cur - ED.span / 3); edDraw(); });
+  // vue d'ensemble : toucher OU glisser le doigt → le curseur et le zoom suivent
+  { const ov = $('ed-over'); let on = false;
+    const go = e => { const r = ov.getBoundingClientRect(); ED.cur = clamp((e.clientX - r.left) / r.width, 0, 1) * ED.t.buffer.duration; ED.view = Math.max(-ED.span / 2, ED.cur - ED.span / 3); edDraw(); };
+    ov.addEventListener('pointerdown', e => { on = true; try { ov.setPointerCapture(e.pointerId); } catch(_){} go(e); });
+    ov.addEventListener('pointermove', e => { if (on) go(e); });
+    ov.addEventListener('pointerup', () => { on = false; if (ED.src){ edStop(); edPlay(); } });
+    ov.addEventListener('pointercancel', () => { on = false; }); }
 }
 document.addEventListener('click', e => {
   const o = e.target.closest('[data-ed]'); if (o){ openEditor(decks[o.dataset.ed]); return; }
@@ -2066,7 +2075,11 @@ document.addEventListener('click', e => {
   else if (b.dataset.bpmx) ED.bpm = Math.round(ED.bpm * parseFloat(b.dataset.bpmx) * 100) / 100;
   else if (b.dataset.gs){ const d = parseFloat(b.dataset.gs); ED.fb += d; ED.m.kick = ED.fb; }
   else { const k = b.dataset.em;
-    if (k === 'kick'){ const a = snapAttack(ED.t.buffer, ED.cur, 0.03); const x = a ?? ED.cur; ED.fb = x; ED.m.kick = x; ED.cur = x; if (a != null) toast('K collé sur l\'attaque du kick (aimant).', 1800); }   // K sur l'attaque exacte : la grille part d'ici
+    const free = $('ed-free').getAttribute('aria-pressed') === 'true', T = edT(), snapBeat = x => ED.fb + Math.round((x - ED.fb) / T) * T;
+    if (free && k === 'kick'){ ED.fb = ED.cur; ED.m.kick = ED.cur; }
+    else if (free && k === 'cut') ED.m.cut = ED.cur;   // C libre : exactement au curseur
+    else if (free && k !== 'cutx') ED.m[k] = snapBeat(ED.cur);   // B1 / B2 / F libres : sur le temps le plus proche
+    else if (k === 'kick'){ const a = snapAttack(ED.t.buffer, ED.cur, 0.03); const x = a ?? ED.cur; ED.fb = x; ED.m.kick = x; ED.cur = x; if (a != null) toast('K collé sur l\'attaque du kick (aimant).', 1800); }   // K sur l'attaque exacte : la grille part d'ici
     else if (k === 'cutx') ED.m.cut = null;
     else ED.m[k] = edSnapBar(ED.cur); }
   edDraw();
@@ -2074,6 +2087,7 @@ document.addEventListener('click', e => {
 $('ed-zin').addEventListener('click', () => { if (ED.span > 0.3){ const c = ED.cur; ED.span /= 2; ED.view = c - ED.span / 3; edDraw(); } });
 $('ed-zout').addEventListener('click', () => { if (ED.span < 200){ const c = ED.cur; ED.span *= 2; ED.view = Math.max(-ED.span / 2, c - ED.span / 3); edDraw(); } });
 $('ed-play').addEventListener('click', edPlay);
+$('ed-free').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); });
 $('ed-click').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); });
 // BPM précis : K sur un kick au début, curseur sur un kick loin (fin du morceau) → BPM = nombre de temps / durée entre les deux
 $('ed-measure').addEventListener('click', () => {

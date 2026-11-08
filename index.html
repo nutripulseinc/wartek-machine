@@ -1736,6 +1736,7 @@ function paramAt(d, key, v, t, tc = 0.03){
 function schedule(d, key, v, t, tc){ plan.events.push({d, key, v, t, tc}); }
 
 function startTransition(dt){
+  if (plan.synced) plan.rate = tempoRatio(plan.o, plan.n);   // tempo de A à cet instant précis
   const fix = preAlign(plan.o, plan.n, plan);   // calcul fait AVANT de lire l'horloge : il ne retarde pas le départ
   if (fix){ plan.rate *= fix.f; plan.bStart += fix.lag * plan.rate; plan.preFix = fix; }
   dt = (plan.oldStart - plan.o.pos()) / plan.o.rate;
@@ -1801,6 +1802,13 @@ function startTransition(dt){
   plan.scheduled = true;
 }
 
+// Comme un DJ qui ramène doucement son pitch à zéro : sur ~8 mesures, par petits pas sur le temps
+function settleTempo(d){
+  const r0 = d.rate; if (Math.abs(r0 - 1) < 0.0005 || Math.abs(r0 - 1) > 0.03) return;
+  const steps = 32; let k = 0;
+  const tick = () => { if (!d.playing || (plan && plan.scheduled)){ return; } if (d.nudging){ setTimeout(tick, 300); return; } k++; d.setRate(r0 + (1 - r0) * k / steps); if (k < steps) setTimeout(tick, d.beatLen / d.rate * 1000); };
+  setTimeout(tick, 1000);
+}
 function finishTransition(){
   const {o, n} = plan, manual = plan.manual; plan = null;
   restoreDeck(o);
@@ -1809,6 +1817,7 @@ function finishTransition(){
   if (n.ctl.vol.value < 100) n.ctl.vol.set(100);
   if (manual){ waitFree = {cur: n, free: o}; return; }
   o.pause();
+  settleTempo(n);
   ['lo', 'mid', 'hi', 'filt'].forEach(k => o.ctl[k].set(0));
   o.ctl.vol.set(100);
   xfCtl.set(n.id === 'A' ? 0 : 100);
@@ -2016,7 +2025,7 @@ async function loadItem(i, deckId){
   try {
     if (!t.buffer) t.buffer = await decode(await t.file.arrayBuffer());
     if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
-      const sh = kickShift(t.buffer, t.firstBeat, 60 / t.bpm); t.firstBeat += sh; t.start += sh; t.kickFix = sh;
+      const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
       if (t.markers && t.markers.kick != null){ t.firstBeat = t.start = t.markers.kick; } }
     d.load(t);
     d.ctl.lo.set(0); d.ctl.filt.set(0);
@@ -2230,31 +2239,55 @@ function xcorrLag(a, bx, L, step){
 }
 const envAt = (t, sec) => { const x = sec * t.envRate, i = Math.floor(x), f = x - i, e = t.env; return i >= 0 && i + 1 < e.length ? e[i] * (1 - f) + e[i + 1] * f : 0; };
 // Décalage (s, temps réel) des kicks de B par rapport à ceux de A, sur une fenêtre de temps réel [t1, t2) après le départ
-// Position exacte des kicks : sur ~200 kicks du morceau, on mesure où démarre vraiment l'attaque (son filtré < 600 Hz : le claquement du kick, sans les charleys ; 50 % du pic)
-// et on recale toute la grille dessus (médiane → insensible aux kicks absents ou aux basses). K, K1, K2 tombent ainsi pile.
-function kickShift(buf, fb, beat){
+// Grille au millième, comme un lecteur Pioneer : on suit TOUS les kicks du morceau du début à la fin,
+// on mesure l'attaque de chacun (son filtré < 600 Hz, 50 % du pic) et on trace la droite qui passe au mieux.
+// → le BPM exact (pas 200,24 au lieu de 200) et une grille qui reste pile sur les kicks jusqu'à la fin (K2, B2, F justes).
+function kickFit(buf, fb, beat){
   const sr = buf.sampleRate, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
-  const a = 1 - Math.exp(-2 * Math.PI * 600 / sr), nBeats = Math.floor((buf.duration - fb) / beat) - 1;
-  if (nBeats < 16) return 0;
-  const every = Math.max(1, Math.floor(nBeats / 200)), res = [], pk = [];
-  const ms = Math.round(sr / 1000), pre = 0.06, post = 0.06;
-  for (let b = 0; b < nBeats; b += every){
-    const tg = fb + b * beat, s0 = Math.floor((tg - pre - 0.08) * sr); if (s0 < 0) continue;
-    const s1 = Math.floor((tg + post) * sr); let y1 = 0, y2 = 0, acc = 0, c = 0; const env = [];
-    for (let i = s0; i < s1 && i < L.length; i++){ const x = (L[i] + R[i]) * 0.5; y1 += a * (x - y1); y2 += a * (y1 - y2); acc += y2 * y2; if (++c === ms){ env.push(Math.sqrt(acc / ms)); acc = 0; c = 0; } }
-    const o = 80, w0 = o, w1 = Math.min(env.length - 1, o + 120);   // fenêtre tg-60 ms .. tg+60 ms
-    let m = 0, mi = -1; for (let k = w0; k <= w1; k++) if (env[k] > m){ m = env[k]; mi = k; }
-    if (mi < 0) continue;
-    const floor = Math.min(...env.slice(w0 - 20, w0 + 5)); if (m < 2.5 * floor + 1e-6) continue;   // pas de vrai kick ici
-    let k = mi; while (k > w0 - 20 && env[k] > floor + 0.5 * (m - floor)) k--;
-    res.push((k + 0.5 - o - 60) / 1000); pk.push(m);
+  const a = 1 - Math.exp(-2 * Math.PI * 600 / sr), ms = Math.round(sr / 1000);
+  const attack = (tp, hw) => {   // attaque du kick autour de tp (± hw s) → {t, pk} ou null
+    const s0 = Math.floor((tp - hw - 0.08) * sr), s1 = Math.floor((tp + hw) * sr); if (s0 < 0 || s1 >= L.length) return null;
+    let y1 = 0, y2 = 0, acc = 0, c = 0; const e2 = [];
+    for (let i = s0; i < s1; i++){ const x = (L[i] + R[i]) * 0.5; y1 += a * (x - y1); y2 += a * (y1 - y2); acc += y2 * y2; if (++c === ms){ e2.push(acc / ms); acc = 0; c = 0; } }
+    // énergie lissée sur 4 ms (sinon les ondulations des basses font sauter la mesure)
+    const env = e2.map((v, k) => { let q = 0, n = 0; for (let j = Math.max(0, k - 3); j <= k; j++){ q += e2[j]; n++; } return Math.sqrt(q / n); });
+    const w0 = 80, w1 = env.length - 1; let m = 0, mi = -1;
+    for (let k = w0; k <= w1; k++) if (env[k] > m){ m = env[k]; mi = k; }
+    if (mi < 0) return null;
+    const floor = Math.min(...env.slice(w0 - 20, w0 + 5)); if (m < 2.5 * floor + 1e-6) return null;
+    const th = floor + 0.5 * (m - floor);
+    let k = mi; while (k > w0 - 20 && env[k - 1] > th) k--;          // remonte jusqu'au début du coup
+    let k0 = w0 - 20; while (k0 < k && env[k0] <= th) k0++;          // et premier passage du seuil
+    k = Math.min(k, k0);
+    const fr = env[k] > env[k - 1] ? (th - env[k - 1]) / (env[k] - env[k - 1]) : 0;   // à la fraction de ms près
+    return {t: s0 / sr + (k - 1 + fr + 0.5) / 1000 - 0.0015, pk: m};
+  };
+  const fit = (pts, Tfix) => {   // droite t = c + b·T (moindres carrés)
+    const n = pts.length; let sb = 0, st = 0; for (const p of pts){ sb += p.b; st += p.t; }
+    const mb = sb / n, mt = st / n; let T = Tfix;
+    if (!T){ let sbb = 0, sbt = 0; for (const p of pts){ sbb += (p.b - mb) ** 2; sbt += (p.b - mb) * (p.t - mt); } T = sbb > 0 ? sbt / sbb : beat; }
+    const c = mt - T * mb; let r = 0; for (const p of pts) r += (p.t - c - p.b * T) ** 2;
+    return {c, T, rms: Math.sqrt(r / n)};
+  };
+  const nBeats = Math.floor((buf.duration - fb) / beat) - 1; if (nBeats < 32) return null;
+  let line = {c: fb, T: beat}, pts = [];
+  const hw = Math.min(0.06, 0.2 * beat);
+  for (let b = 0; b < nBeats; b++){
+    const r = attack(line.c + b * line.T, hw); if (r) pts.push({b, t: r.t, pk: r.pk});
+    if (b % 16 === 15 && pts.length >= 12){   // on réajuste la droite au fil du morceau
+      const pk = [...pts].map(p => p.pk).sort((x, y) => x - y)[Math.floor(pts.length / 2)];
+      const g = pts.filter(p => p.pk >= 0.4 * pk); if (g.length >= 8){ const f = fit(g); if (Math.abs(f.T / beat - 1) < 0.01) line = f; }
+    }
   }
-  if (res.length < 12) return 0;
-  const mp = [...pk].sort((x, y) => x - y)[Math.floor(pk.length / 2)];
-  const good = res.filter((v, i) => pk[i] >= 0.5 * mp).sort((x, y) => x - y);
-  if (good.length < 8) return 0;
-  const med = good[Math.floor(good.length / 2)];
-  return Math.abs(med) <= 0.04 ? med : 0;
+  if (pts.length < 24) return null;
+  const pkm = [...pts].map(p => p.pk).sort((x, y) => x - y)[Math.floor(pts.length / 2)];
+  let g = pts.filter(p => p.pk >= 0.4 * pkm), f = fit(g);
+  for (let it = 0; it < 3; it++){ const lim = Math.max(0.004, 2.5 * f.rms); const g2 = g.filter(p => Math.abs(p.t - f.c - p.b * f.T) <= lim); if (g2.length < 16) break; g = g2; f = fit(g); }
+  if (Math.abs(f.T / beat - 1) > 0.01 || Math.abs(f.c - fb) > 0.2 * beat) return null;
+  // BPM rond (200, 150, 174,5…) si la droite le confirme : c'est presque toujours le cas en hard music
+  let bpm = 60 / f.T; const cand = [Math.round(bpm), Math.round(bpm * 2) / 2];
+  for (const cb of cand){ const fs = fit(g, 60 / cb); if (fs.rms <= f.rms * 1.15 + 0.0005){ bpm = cb; f = fs; break; } }
+  return {fb: f.c, bpm: Math.round(bpm * 1000) / 1000, rms: f.rms, n: g.length};
 }
 function kickLag(o, n, aStart, bStart, rA, rB, t1, t2, beat){
   if (!o.item || !n.item) return null;

@@ -1173,7 +1173,7 @@ class Deck {
   }
   get duration(){ return this.buffer ? this.buffer.duration : 0; }
   get beatLen(){ return this.bpm ? 60 / this.bpm : 0; }
-  pos(){ return this.playing ? Math.min(this.duration, this.offset + Math.max(0, ctx.currentTime - this.t0) * this.rate) : this.offset; }
+  pos(){ return this.playing ? Math.min(this.duration, Math.max(0, this.offset + (ctx.currentTime - this.t0) * this.rate)) : this.offset; }
   load(item){
     this.pause();
     this.item = item; this.buffer = item.buffer; this.bpm = item.bpm; this.firstBeat = item.firstBeat || 0;
@@ -1184,6 +1184,7 @@ class Deck {
   unload(){ this.pause(); this.item = null; this.buffer = null; this.peaks = null; this.bpm = 0; this.offset = 0; this.rate = 1; }
   playAt(when, off){
     if (!this.buffer) return;
+    when = Math.max(when, ctx.currentTime + LEAD());   // jamais « dans le passé » : sinon le son part en retard sans qu'on le sache
     this.pause();
     this.offset = clamp(off, 0, this.duration - 0.05);
     const s = ctx.createBufferSource(); s.buffer = this.buffer; s.playbackRate.value = this.rate; s.connect(this.input);
@@ -1191,35 +1192,32 @@ class Deck {
     s.start(when, this.offset); this.src = s; this.t0 = when; this.playing = true;
     keepAwake();
   }
-  play(){ if (!this.buffer) return; if (this.offset >= this.duration - 0.05) this.offset = 0; this.playAt(ctx.currentTime, this.offset); }
+  play(){ if (!this.buffer) return; if (this.offset >= this.duration - 0.05) this.offset = 0; this.playAt(ctx.currentTime + LEAD(), this.offset); }
   pause(){
     if (!this.playing) return;
     this.offset = this.pos(); const s = this.src; this.src = null; this.playing = false;
     s.onended = null; try { s.stop(); } catch(e){}
   }
   seek(t){ t = clamp(t, 0, this.duration); const was = this.playing; if (was) this.pause(); this.offset = t; if (was) this.play(); }
-  setRate(rate){
-    const now = ctx.currentTime;
-    if (this.playing && now >= this.t0){ this.offset = this.pos(); this.t0 = now; }
+  // Changement de vitesse planifié sur l'horloge audio, avec la position comptée exactement depuis ce moment-là
+  setRate(rate, at = 0){
+    const t = Math.max(at, ctx.currentTime + LEAD());
+    if (this.playing && t >= this.t0){ this.offset = this.offset + (t - this.t0) * this.rate; this.t0 = t; }
     this.rate = rate;
-    if (this.src) this.src.playbackRate.setValueAtTime(rate, now);
+    if (this.src) this.src.playbackRate.setValueAtTime(rate, t);
     this.applyFx();
+    return t;
   }
-  // Petit coup de pitch pour rattraper un décalage (en secondes) en 0,8 s, puis retour au tempo exact
+  // Petit coup de pitch pour rattraper un décalage (en secondes), puis retour au tempo, tout sur l'horloge audio
   nudge(shift, T = 0.8, f = 1){
     if (!this.playing || this.nudging || !this.src) return;
     const base = this.rate, nb = base * f, fast = base * (1 + shift / T), src = this.src; this.nudging = true;
-    this.setRate(fast);
-    const tEnd = ctx.currentTime + T;
-    src.playbackRate.setValueAtTime(nb, tEnd);   // retour au tempo pile au bon moment (horloge audio)
+    const tS = this.setRate(fast), tEnd = tS + T;
+    src.playbackRate.setValueAtTime(nb, tEnd);
     setTimeout(() => {
-      if (this.src === src && this.playing){
-        const now = ctx.currentTime;
-        this.offset = this.offset + (tEnd - this.t0) * fast + Math.max(0, now - tEnd) * nb; this.t0 = now;
-        this.rate = nb; this.applyFx();
-      }
+      if (this.src === src && this.playing && this.t0 === tS){ this.offset = this.offset + (tEnd - tS) * fast; this.t0 = tEnd; this.rate = nb; this.applyFx(); }
       this.nudging = false; this.nudgeEnd = ctx.currentTime;
-    }, T * 1000 + 20);
+    }, (tEnd - ctx.currentTime) * 1000 + 30);
   }
   applyFx(){
     const a = this.fxAmt, r = this.fxRate, fb = this.fxFb, now = ctx.currentTime, T = 0.04, on = n => this.fx === n ? 1 : 0;
@@ -1741,11 +1739,11 @@ function startTransition(dt){
   const fix = preAlign(plan.o, plan.n, plan);   // calcul fait AVANT de lire l'horloge : il ne retarde pas le départ
   if (fix){ plan.rate *= fix.f; plan.bStart += fix.lag * plan.rate; plan.preFix = fix; }
   dt = (plan.oldStart - plan.o.pos()) / plan.o.rate;
-  const {o, n} = plan, now = ctx.currentTime, T0 = now + Math.max(0.02, dt), beat = o.beatLen / o.rate, L = plan.Lp;
+  const {o, n} = plan, now = ctx.currentTime, T0 = now + Math.max(LEAD(), dt), beat = o.beatLen / o.rate, L = plan.Lp;
   // Si on est en retard sur K2, B démarre un peu plus loin dans son morceau : son K reste collé au K2 de A
   // Pré-calage : avant de lancer B, on compare ses kicks à ceux de A sur l'intro et autour de B1/B2.
   // Décalage → on déplace le départ de B ; écart de tempo → on corrige son pitch. Tout est réglé avant qu'on l'entende.
-  const late0 = Math.max(0, 0.02 - dt) * plan.rate;
+  const late0 = Math.max(0, LEAD() - dt) * plan.rate;
   const tDrop = now + (plan.P - o.pos()) / o.rate;
   plan.events = []; plan.T0 = T0; plan.tDrop = tDrop;
   n.setRate(plan.rate);
@@ -2205,6 +2203,8 @@ let lastDraw = 0;
 // Calage automatique : on compare les kicks réellement joués par les deux platines.
 // S'ils ne tombent pas ensemble, petit coup de pitch sur le son qui entre ; une fois calé, on ne touche plus.
 let lastLock = 0, lockInfo = null;
+// Marge pour tout ce qu'on planifie sur l'horloge audio (taille du tampon audio du téléphone comprise)
+function LEAD(){ return Math.max(0.06, 2 * (ctx.baseLatency || 0) + 0.02); }
 // Attaques des kicks à 1 ms près, lues directement dans le son (basses filtrées < 150 Hz, front montant de l'énergie)
 function kickOnsets(buf){
   const sr = buf.sampleRate, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;

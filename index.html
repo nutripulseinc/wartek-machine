@@ -2684,7 +2684,9 @@ function downbeat(t){
   // Le morceau démarre sur un kick net, mais la grille tombe à mi-chemin entre deux temps : la grille est sur un contretemps
   // (basse, clap). On la recale sur ce premier kick.
   { let r = (t0 - fb) / T; r = (r - Math.round(r)) * T;
-    if (at0 != null && Math.abs(r) >= 0.3 * T){ shift = r; fb += r; q = Math.round(r / T * 4); } }
+    // seulement si les kicks mesurés du début du morceau confirment (sinon le premier son n'était pas un kick : pad, voix…)
+    const ks = t.fitInfo && t.fitInfo.kicks, err = f => { if (!ks) return 1; const r2 = []; for (const x of ks){ if (x < t0 - 0.05 || x > t0 + 64 * T) continue; let w = (x - f) / T; r2.push(Math.abs(w - Math.round(w)) * T); } if (r2.length < 8) return 1; r2.sort((a, b) => a - b); return r2[Math.floor(r2.length / 2)]; };
+    if (at0 != null && Math.abs(r) >= 0.3 * T && err(fb + r) < 0.5 * err(fb)){ shift = r; fb += r; q = Math.round(r / T * 4); } }
   // K = le temps de la grille au départ du son
   let k = fb + Math.round((t0 - fb) / T) * T;
   if (Math.abs(k - t0) > 0.35 * T) k = fb + Math.ceil((t0 - fb) / T - 0.35) * T;   // le son démarre entre deux temps (pad, voix) : premier vrai temps

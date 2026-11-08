@@ -244,6 +244,7 @@ button{cursor:pointer}
 .dlist li.now .n{color:var(--go)}
 .dnote{color:var(--mute);font-size:16px;padding:14px 0;line-height:1.4;display:block!important;border:0!important}
 .sbody{padding:14px 18px 18px;overflow-y:auto;display:grid;gap:18px;touch-action:pan-y}
+.snote{margin:0 0 10px;font-size:14px;color:var(--mute);line-height:1.4}
 .sgroup h3{margin:0 0 8px;font-size:15px;letter-spacing:.14em;color:var(--mute);text-transform:uppercase}
 .opts{display:grid;gap:8px}
 .opt{display:grid;grid-template-columns:22px 1fr;gap:12px;align-items:start;text-align:left;border:1px solid #2e3034;background:#1a1b1e;border-radius:8px;padding:10px 14px;touch-action:manipulation}
@@ -656,6 +657,11 @@ body[data-skin="psy"] .bline{background:linear-gradient(90deg,transparent,#3dffb
             <button class="opt" data-mode="hp" role="radio" aria-checked="false"><i></i><div><b>Casque seul (préparation)</b><span>Tu entends le mix casque sur toute la sortie, pour préparer ton set sans enceinte.</span></div></button>
             <button class="opt" data-mode="quad" role="radio" aria-checked="false" id="opt-quad"><i></i><div><b>Carte son DJ 4 sorties</b><span id="quad-note">Sorties 1-2 vers l'enceinte, 3-4 vers le casque. Il faut une carte son ou un contrôleur DJ branché en USB.</span></div></button>
           </div>
+        </div>
+        <div class="sgroup">
+          <h3>Rapport de mix</h3>
+          <p class="snote">Si un mix part décalé : copie ce rapport juste après et colle-le dans la conversation avec Claude. Il contient les mesures de l'analyse et du lancement (aucun son, aucun fichier).</p>
+          <button class="dbtn" id="diag-copy">Copier le rapport</button>
         </div>
         <div class="sgroup">
           <h3>Plein écran</h3>
@@ -1831,7 +1837,16 @@ function settleTempo(d){
   const tick = () => { if (!d.playing || (plan && plan.scheduled)){ return; } if (d.nudging){ setTimeout(tick, 300); return; } k++; d.setRate(r0 + (1 - r0) * k / steps); if (k < steps) setTimeout(tick, d.beatLen / d.rate * 1000); };
   setTimeout(tick, 1000);
 }
+const DIAG = [];
+function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struct || {};
+  return {nom: t.name, bpm: t.bpm, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar, marqueurs: t.markers || {}}; }
+function diagPlan(p){
+  DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
+    oreille_ms: p.earLog || [], corrections: p.earFix || 0, latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
+  if (DIAG.length > 6) DIAG.shift();
+}
 function finishTransition(){
+  if (plan) diagPlan(plan);
   const {o, n} = plan, manual = plan.manual; plan = null;
   restoreDeck(o);
   // B toujours à fond à la fin du mix (même si A s'est arrêté avant la basse de B)
@@ -1890,12 +1905,15 @@ function earCheck(plan, now){
   plan.earT = now;
   const lag = earLag(n, Math.min(6, free - 0.3), beat);
   if (lag == null){ lockInfo = {t: now, txt: 'OREILLE ?'}; return; }
-  plan.earLast = lag;
-  if (Math.abs(lag) < 0.0025){ lockInfo = {t: now, txt: 'CALÉ À L\'OREILLE ✓'}; return; }
+  const prev = plan.earLast; plan.earLast = lag;
+  (plan.earLog = plan.earLog || []).push(Math.round(lag * 1000));
+  if (Math.abs(lag) < 0.004){ lockInfo = {t: now, txt: 'CALÉ À L\'OREILLE ✓'}; return; }
+  // On ne corrige que si deux écoutes de suite donnent le même écart (à 3 ms près) : pas de coup de pitch sur une fausse mesure
+  if (prev == null || Math.abs(prev - lag) > 0.003){ lockInfo = {t: now, txt: `ÉCOUTE… ${Math.round(lag * 1000)} ms`}; return; }
   // On ne corrige que pendant l'intro de B (avant le swap des basses), 4 coups au plus
   if (now > plan.tDrop - 2 * beat || (plan.earFix || 0) >= 4){ lockInfo = {t: now, txt: `ÉCART ${Math.round(lag * 1000)} ms`}; return; }
   plan.earFix = (plan.earFix || 0) + 1;
-  n.nudge(lag, Math.max(0.25, Math.abs(lag) / 0.03));
+  n.nudge(lag, Math.max(0.25, Math.abs(lag) / 0.03)); plan.earLast = null;
   lockInfo = {t: now, txt: `RECALAGE ${n.id} ${lag > 0 ? '+' : ''}${Math.round(lag * 1000)} ms`};
 }
 function autoTick(){
@@ -2087,6 +2105,11 @@ $('qp-ok').addEventListener('click', () => {
 });
 document.addEventListener('click', e => { const b = e.target.closest('[data-qpick]'); if (b) openQPick(b.dataset.qpick); });
 $('lib-file').addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; if (files.length){ addFiles(files); renderLib(); } });
+$('diag-copy').addEventListener('click', async () => {
+  const txt = 'RAPPORT WARTEK MACHINE\n' + JSON.stringify({ua: navigator.userAgent, mix: DIAG.length ? DIAG : 'aucun mix terminé', en_cours: plan ? {sort: diagTrack(plan.o), entre: diagTrack(plan.n), oreille_ms: plan.earLog || []} : null}, null, 1);
+  try { await navigator.clipboard.writeText(txt); toast('Rapport copié : colle-le dans la conversation avec Claude.'); }
+  catch(e){ const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Rapport copié.'); } catch(_){ toast('Copie impossible ici.'); } ta.remove(); }
+});
 document.querySelectorAll('.opt').forEach(o => o.addEventListener('click', () => { if (!o.disabled){ setRoute(o.dataset.mode); hpHintShown = true; } }));
 if (!document.documentElement.requestFullscreen) $('fs').hidden = true;
 $('fs').addEventListener('click', async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); $('settings').hidden = true; } catch(e){ toast('Plein écran indisponible ici.'); } });

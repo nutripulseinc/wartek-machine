@@ -95,9 +95,9 @@ button{cursor:pointer}
 .fname span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .fname button{border:0;background:none;padding:0 2px;font-size:18px;color:var(--fg);line-height:1}
 .fname > span:first-child{flex:1;min-width:0}
-.fname .mk{display:flex;gap:4px;margin:0 6px;flex:none}
-.fname .mk button{font-family:var(--font-lcd);font-size:12px;height:18px;min-width:22px;padding:0 4px;border-radius:3px;border:1px solid currentColor;line-height:16px}
-.fname .mk [data-mk="kick"]{color:#20e6e8}.fname .mk [data-mk="bass"]{color:#3dffb0}.fname .mk [data-mk="out"]{color:#ff3d6e}
+.fname .mk{display:flex;gap:3px;margin:0 4px;flex:none}
+.fname .mk button{font-family:var(--font-lcd);font-size:11px;height:18px;min-width:18px;padding:0 3px;border-radius:3px;border:1px solid currentColor;line-height:16px}
+.fname .mk [data-mk="kick"]{color:#20e6e8}.fname .mk [data-mk="bass"]{color:#3dffb0}.fname .mk [data-mk="bass2"]{color:#e5ff3d}.fname .mk [data-mk="out"]{color:#ff3d6e}
 .lcd.small canvas{top:24px;height:calc(100% - 24px);cursor:pointer}
 
 .synccol,.playcol{display:grid;justify-items:center;align-content:center;gap:6px;text-align:center}
@@ -536,7 +536,7 @@ function setMarker(d, kind){
   } else {
     const bar = 4 * bl, b = Math.max(0, Math.round((pos - t.firstBeat) / bar));
     t.markers[kind] = t.firstBeat + b * bar;
-    msg = kind === 'bass' ? `1re BASSE posée mesure ${b + 1} (${b * 4} temps après le KICK)` : `FIN de basse posée mesure ${b + 1}`;
+    msg = kind === 'bass' ? `B1 (1re basse) posé mesure ${b + 1} (${b * 4} temps après le KICK)` : kind === 'bass2' ? `B2 (dernière ligne de basse) posé mesure ${b + 1}` : `FIN de basse posée mesure ${b + 1}`;
   }
   t.struct = null; t.barE = null; t.barR = null; structureOf(t); d.overDirty = true;
   if (t.id) saveTrack(t);
@@ -621,6 +621,18 @@ async function analyzeBpm(buffer){
   let P = bestL + (den < 0 ? 0.5 * (y0 - y2) / den : 0);
   // musiques rapides : tempo ramené entre 120 et 240 BPM (Hardstyle ~150, Hardcore ~175, Frenchcore ~200)
   while (60 * fps / P < 120) P /= 2; while (60 * fps / P >= 240) P *= 2;
+  // Erreurs classiques de tempo (moitié, double, 2/3, 3/4…) : on garde la grille qui tombe le plus souvent sur un kick
+  {
+    const b0bpm = 60 * fps / P, prior = b => Math.exp(-0.5 * Math.pow(Math.log2(b / 165) / 0.6, 2));
+    const comb = Pc => { let best = 0; for (let p = 0; p < Pc; p += 0.5){ let a = 0, c = 0; for (let x = p; x < n - 1; x += Pc){ const i = Math.round(x); a += Math.max(kick[i] || 0, kick[i - 1] || 0, kick[i + 1] || 0); c++; } if (c && a / c > best) best = a / c; } return best; };
+    let bestS = -1, bestP = P;
+    for (const f of [1, 1.5, 1 / 1.5, 2, 0.5, 4 / 3, 3 / 4]){
+      const b = b0bpm * f; if (b < 120 || b >= 240) continue;
+      const Pc = 60 * fps / b, sc = comb(Pc) * (0.85 + 0.15 * prior(b));
+      if (sc > bestS * 1.03 || (f === 1 && sc > bestS)){ bestS = sc; bestP = Pc; }
+    }
+    P = bestP;
+  }
 
   // 3. phase grossière puis régression sur les temps réels
   let bs = -1, ph = 0;
@@ -648,8 +660,9 @@ async function analyzeBpm(buffer){
   for (const sec of [20, 45, 90, 180, 1e9]) fit(sec * fps, win);
   fit(1e12, 0.035 * fps, 0.025 * fps);
   let bpm = 60 * fps / b0;
-  if (Math.abs(bpm - Math.round(bpm)) < 0.05){
-    bpm = Math.round(bpm); const bf = 60 * fps / bpm;
+  const halfB = Math.round(bpm * 2) / 2;
+  if (Math.abs(bpm - Math.round(bpm)) < 0.2 || Math.abs(bpm - halfB) < 0.08){
+    bpm = Math.abs(bpm - Math.round(bpm)) < 0.2 ? Math.round(bpm) : halfB; const bf = 60 * fps / bpm;
     // recale la phase avec le tempo arrondi
     let S = 0, Sd = 0; for (let k = 0; ; k++){ const c = a0 + k * bf; if (c >= n - 2) break; if (c < 1) continue;
       const lo = Math.max(1, Math.floor(c - 0.03 * fps)), hi = Math.min(n - 2, Math.ceil(c + 0.03 * fps)); let bi = -1, bv = 0;
@@ -715,10 +728,18 @@ function structureOf(t){
     const r8 = ph + Math.round((b - ph) / 8) * 8; if (Math.abs(b - r8) <= 2) return Math.max(0, r8);
     const p4 = ph % 4, r4 = p4 + Math.round((b - p4) / 4) * 4; return Math.abs(b - r4) <= 1 ? Math.max(0, r4) : b;
   };
-  bi = bi <= 2 ? 0 : snapP(bi); bo = snapP(bo);
+  const snap4 = b => { const r4 = Math.round(b / 4) * 4; return Math.abs(b - r4) <= 1 ? Math.max(0, r4) : b; };
+  bi = bi <= 2 ? 0 : snap4(bi); bo = snap4(bo);
   if (m.bass != null) bi = Math.max(0, Math.round((m.bass - t.firstBeat) / bar));
   if (m.out != null) bo = Math.max(bi + 1, Math.round((m.out - t.firstBeat) / bar));
-  t.struct = {drop: t.firstBeat + bi * bar, outro: t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph};
+  // B2 : début de la dernière ligne de basse (dernier bloc de basse continu avant la fin)
+  let b2 = null;
+  { let i = bo - 1, gap = 0; while (i > bi){ if (e[i] >= thr){ gap = 0; i--; } else if (++gap >= 2) break; else i--; }
+    let st = i + gap; const r4 = Math.round(st / 4) * 4; if (Math.abs(st - r4) <= 1) st = r4;
+    if (st > bi + 4 && st < bo) b2 = st; }
+  if (m.bass2 != null) b2 = Math.max(bi, Math.round((m.bass2 - t.firstBeat) / bar));
+  t.struct = {drop: t.firstBeat + bi * bar, outro: t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph,
+              lastBass: b2 == null ? null : t.firstBeat + b2 * bar, lastBar: b2};
   return t.struct;
 }
 
@@ -1052,7 +1073,7 @@ function panelMarkup(id){
             <input type="file" id="${id}-file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden>
           </div>
           <div class="lcd small">
-            <div class="fname"><span id="${id}-fname">Aucun morceau</span><span class="mk"><button data-mk="kick" data-d="${id}" aria-label="Poser le marqueur KICK ici">K</button><button data-mk="bass" data-d="${id}" aria-label="Poser le marqueur 1re BASSE ici">B</button><button data-mk="out" data-d="${id}" aria-label="Poser le marqueur FIN de basse ici">F</button></span><button id="${id}-eject" aria-label="Éjecter le morceau">×</button></div>
+            <div class="fname"><span id="${id}-fname">Aucun morceau</span><span class="mk"><button data-mk="kick" data-d="${id}" aria-label="Poser le marqueur KICK ici">K</button><button data-mk="bass" data-d="${id}" aria-label="Poser le marqueur B1 (1re ligne de basse) ici">B1</button><button data-mk="bass2" data-d="${id}" aria-label="Poser le marqueur B2 (dernière ligne de basse) ici">B2</button><button data-mk="out" data-d="${id}" aria-label="Poser le marqueur FIN de basse ici">F</button></span><button id="${id}-eject" aria-label="Éjecter le morceau">×</button></div>
             <canvas id="${id}-over" aria-label="Morceau entier : touche pour te déplacer"></canvas>
           </div>
         </div>
@@ -1363,10 +1384,19 @@ function makePlan(o, n){
   };
   const limit = Math.min(so.outro, E - 4 * ob);       // le swap doit avoir lieu avant la fin des basses de A
   let aStart, I;
-  // 1er choix : le dernier début de bloc de 32 temps de A qui laisse toute l'intro de B avant la fin de A
+  // Règle principale : la 1re basse de B (B1) part EN MÊME TEMPS que la dernière ligne de basse de A (B2).
+  // B est lancé sur son 1er kick (K) exactement la longueur de son intro avant.
+  const Ifull = Math.min(Math.round(introB / 4) * 4, 128);
+  let useB2 = false;
+  if (synced && so.lastBass != null && so.lastBass <= E - 4 * ob && so.lastBass - Ifull * ob >= pos + lead){
+    aStart = so.lastBass - Ifull * ob; I = Ifull; useB2 = true;
+  }
+  if (!useB2){
+  // Sinon : le dernier début de bloc de 32 temps de A qui laisse toute l'intro de B avant la fin de A
   I = bgFor(128);
   aStart = grid(limit - I * ob, phrase, false);
-  if (aStart < pos + lead){
+  }
+  if (!useB2 && aStart < pos + lead){
     // Trop tard : prochain bloc de 32 temps, et arrière-plan raccourci pour tenir avant la fin
     aStart = grid(pos + lead, phrase, true);
     if (aStart > limit) aStart = grid(pos + lead, 16 * ob, true);
@@ -1382,7 +1412,7 @@ function makePlan(o, n){
   // (si A finit avant la basse de B, A s'éteint simplement à sa fin)
   let cutBar = null;
   for (let k = 1; k <= postBars && dBar + k < eB.length; k++){ if (eB[dBar + k] < 0.5 * refE){ cutBar = k; break; } }
-  return {o, n, rate: r, synced, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+  return {o, n, rate: r, synced, useB2, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + (cutBar || postBars) * 4, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
@@ -1710,7 +1740,7 @@ function drawZoom(d){
   }
   g.globalAlpha = 1;
   const st = d.item && d.item.struct;
-  if (st) [[d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'BASSE'], [st.outro, C.alert, 'FIN']].forEach(([tm, col, lb]) => {
+  if (st) [[d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'FIN']].filter(x => x[0] != null).forEach(([tm, col, lb]) => {
     const x = (tm - t0) * pps; if (x < 0 || x > W) return;
     g.fillStyle = col; g.fillRect(x - u, top, 2 * u, h);
     g.font = `${Math.round(11 * u)}px ${LCD_FONT}`; g.textBaseline = 'bottom'; g.fillText(lb, x + 3 * u, top + h);
@@ -1752,9 +1782,9 @@ function drawOver(d){
     const ph32 = 32 * d.beatLen, p0 = st.phrase0 ?? d.firstBeat;
     for (let t = p0 - Math.floor((p0 - d.firstBeat) / ph32) * ph32; t < d.duration; t += ph32) o.fillRect(Math.round(t / d.duration * W), 0, Math.max(1, u), H * 0.18);
     o.font = `${Math.round(H * 0.16)}px ${LCD_FONT}`; o.textBaseline = 'top';
-    [[d.firstBeat, '#20e6e8', 'K'], [st.drop, C.go, 'B'], [st.outro, C.alert, 'F']].forEach(([t, col, lb]) => {
+    [[d.firstBeat, '#20e6e8', 'K'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'F']].filter(x => x[0] != null).forEach(([t, col, lb]) => {
       const x = Math.round(t / d.duration * W); o.fillStyle = col; o.fillRect(x, 0, 2 * u, H);
-      o.fillRect(x, H * 0.2, H * 0.16, H * 0.18); o.fillStyle = '#031216'; o.fillText(lb, x + H * 0.03, H * 0.21);
+      o.fillRect(x, H * 0.2, H * 0.08 * (lb.length + 1), H * 0.18); o.fillStyle = '#031216'; o.fillText(lb, x + H * 0.03, H * 0.21);
     });
     d.overImg = off; d.overDirty = false;
   }
@@ -1815,7 +1845,7 @@ function updateLcd(){
   const cur = Object.values(decks).find(d => d.playing && d.t0 <= ctx.currentTime);
   if (plan){
     const now = ctx.currentTime, id = `${plan.o.id}→${plan.n.id}`, beat = plan.o.beatLen / plan.o.rate;
-    if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; }
+    if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = plan.useB2 ? `B1 de ${plan.n.id} calé sur B2 de ${plan.o.id} · départ sur son 1er kick` : `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; }
     else if (now < plan.tDrop){ a = `${plan.n.id} ENTRE · SWAP DANS ${Math.ceil((plan.tDrop - now) / beat)} T`; b = `${plan.cfx || 'CFX'} · basses ${plan.n.id} coupées`; }
     else if (now < plan.tDrop + 4 * beat){ a = `BASS SWAP → ${plan.n.id}`; b = `Basses ${plan.o.id} coupées net`; }
     else if (plan.cutBar){ a = `MIX ${id} · BREAK DE ${plan.n.id} DANS ${Math.max(0, Math.ceil((plan.tEnd - now) / beat))} T`; b = `${plan.o.id} sera coupé sur le break`; }

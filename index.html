@@ -765,6 +765,14 @@ body[data-skin="horror"] .logo > *,body[data-skin="horror"] .logo .wlogo,body[da
 body[data-skin="horror"] .logo::before,body[data-skin="horror"] .logo::after{display:none!important}
 @media (prefers-reduced-motion: reduce){body[data-skin="horror"] .logo{animation:none!important}}
 
+
+/* « MACHINE » sous les logos images (horreur, années 90) */
+body[data-skin="horror"] .logo,body[data-skin="y90"] .logo{background-position:center top!important;background-size:auto 74%!important;height:112px!important;margin-top:-6px}
+body[data-skin="horror"] .logo::after,body[data-skin="y90"] .logo::after{display:block!important;content:"MACHINE"!important;position:absolute;left:0;right:0;bottom:0;top:auto;text-align:center;line-height:1;visibility:visible!important;background:none!important;width:auto;height:auto;transform:none;pointer-events:none}
+body[data-skin="horror"] .logo::after{font-family:"WK Creep",serif;font-size:24px;letter-spacing:.42em;padding-left:.42em;color:#9a8a80;text-shadow:0 2px 0 #000,0 0 6px rgba(0,0,0,.9),0 0 10px rgba(150,0,15,.5);opacity:.9}
+body[data-skin="y90"] .logo::after{font-family:"Orbitron","Exo 2",sans-serif;font-weight:800;font-size:23px;letter-spacing:.5em;padding-left:.5em;filter:drop-shadow(0 0 3px #ff4fd8) drop-shadow(0 0 8px #3ad7ff);
+  background:linear-gradient(180deg,#bff6ff 0%,#3ad7ff 45%,#ff4fd8 55%,#ffd1f4 100%)!important;-webkit-background-clip:text!important;background-clip:text!important;color:transparent;-webkit-text-stroke:.5px rgba(40,10,60,.6)}
+
 body[data-skin="psy"]{--neon:#3dffb0;--lcd:#0c0a1a;--lcd-fg:#d8ffef;--fg:#ffffff;--mute:#d8c8ff;--font-ui:"Righteous","Exo 2",sans-serif}
 html:has(body[data-skin="psy"]),body[data-skin="psy"]{background:radial-gradient(circle at 15% 20%,#3dffb0 0,transparent 30%),radial-gradient(circle at 85% 80%,#ff4fd8 0,transparent 35%),radial-gradient(circle at 80% 15%,#8b5cff 0,transparent 30%),radial-gradient(circle at 20% 85%,#20e6e8 0,transparent 30%),#2a1650}
 body[data-skin="psy"] .stage::before{border:2px solid rgba(255,255,255,.35);box-shadow:0 0 30px rgba(139,92,255,.6)}

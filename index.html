@@ -593,6 +593,18 @@ body[data-skin="y90"] .logo::before,body[data-skin="y90"] .logo::after{display:n
 @keyframes y90Glow{0%,100%{filter:drop-shadow(0 0 4px rgba(255,79,216,.7)) drop-shadow(0 0 12px rgba(80,200,255,.5))}50%{filter:drop-shadow(0 0 7px rgba(255,79,216,.95)) drop-shadow(0 0 20px rgba(80,200,255,.8))}}
 @media (prefers-reduced-motion: reduce){body[data-skin="y90"] .logo{animation:none}}
 
+
+/* années 90 : logo façon enseigne néon (tube qui s'allume, halo rose/cyan qui vibre) */
+body[data-skin="y90"] .logo{animation:y90Neon 9s infinite!important}
+@keyframes y90Neon{
+  0%,100%{filter:brightness(1.12) saturate(1.3) drop-shadow(0 0 1px #fff) drop-shadow(0 0 4px #ff4fd8) drop-shadow(0 0 10px #ff4fd8) drop-shadow(0 0 22px #3ad7ff) drop-shadow(0 0 40px rgba(58,215,255,.6))}
+  48%{filter:brightness(1.2) saturate(1.35) drop-shadow(0 0 1px #fff) drop-shadow(0 0 5px #ff4fd8) drop-shadow(0 0 13px #ff4fd8) drop-shadow(0 0 28px #3ad7ff) drop-shadow(0 0 50px rgba(58,215,255,.75))}
+  70%{filter:brightness(1.12) saturate(1.3) drop-shadow(0 0 1px #fff) drop-shadow(0 0 4px #ff4fd8) drop-shadow(0 0 10px #ff4fd8) drop-shadow(0 0 22px #3ad7ff) drop-shadow(0 0 40px rgba(58,215,255,.6))}
+  71%{filter:brightness(.55) saturate(.8) drop-shadow(0 0 2px rgba(255,79,216,.3))}
+  72%{filter:brightness(1.25) saturate(1.4) drop-shadow(0 0 1px #fff) drop-shadow(0 0 6px #ff4fd8) drop-shadow(0 0 14px #ff4fd8) drop-shadow(0 0 30px #3ad7ff)}
+  73%{filter:brightness(.6) saturate(.8) drop-shadow(0 0 2px rgba(255,79,216,.3))}
+  74.5%{filter:brightness(1.12) saturate(1.3) drop-shadow(0 0 1px #fff) drop-shadow(0 0 4px #ff4fd8) drop-shadow(0 0 10px #ff4fd8) drop-shadow(0 0 22px #3ad7ff) drop-shadow(0 0 40px rgba(58,215,255,.6))}}
+
 body[data-skin="horror"]{--neon:#d42020;--lcd:#0b0a0a;--lcd-fg:#cfe0e0;--fg:#e2dcd8;--mute:#8f8682;--font-ui:"Barlow Condensed","Arial Narrow",sans-serif;
   --blood:radial-gradient(ellipse 30px 18px at 14% 22%,rgba(140,8,8,.85),transparent 70%),radial-gradient(circle 9px at 18% 30%,rgba(120,6,6,.8),transparent 70%),radial-gradient(ellipse 44px 26px at 82% 66%,rgba(130,6,6,.8),transparent 70%),radial-gradient(circle 6px at 76% 74%,rgba(150,10,10,.8),transparent 70%),radial-gradient(circle 4px at 88% 58%,rgba(150,10,10,.8),transparent 70%);
   --hole:radial-gradient(circle 9px at 62% 14%,#000 0 5px,#3a3330 6px,rgba(0,0,0,.5) 9px,transparent 10px),radial-gradient(circle 9px at 30% 84%,#000 0 5px,#3a3330 6px,rgba(0,0,0,.5) 9px,transparent 10px)}

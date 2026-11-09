@@ -697,6 +697,15 @@ body[data-skin="horror"] .w2{animation:horFlickDeep2 4.7s infinite steps(1)!impo
 @media (prefers-reduced-motion: reduce){body[data-skin="horror"] .wlogo,body[data-skin="horror"] .w2{animation:none!important}}
 body[data-skin="horror"] .logo::before{inset:-10px 14% -4px 14%!important;opacity:1!important;background:var(--sp6) 10% 10%/120px 120px no-repeat,var(--sp10) 82% 0%/110px 110px no-repeat,var(--sp1) 48% 60%/80px 80px no-repeat,var(--sp3) 28% 100%/60px 60px no-repeat,var(--sp8) 96% 80%/70px 70px no-repeat!important;filter:brightness(.5) saturate(1.4) drop-shadow(0 1px 1px rgba(0,0,0,.6))}
 
+
+/* --- horreur v5 : logo délavé, léger scintillement, une coupure toutes les ~20 s, sans sang --- */
+body[data-skin="horror"] .logo::before{display:none!important}
+body[data-skin="horror"] .logo::after{display:none!important}
+body[data-skin="horror"] .wlogo{filter:url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='r' color-interpolation-filters='sRGB'%3E%3CfeColorMatrix values='.36 .42 .3 0 .03  .06 .08 .06 0 .02  .06 .08 .06 0 .02  0 0 0 .82 0'/%3E%3C/filter%3E%3C/svg%3E#r") drop-shadow(0 0 1px rgba(0,0,0,.9)) drop-shadow(0 0 3px rgba(0,0,0,.7)) drop-shadow(0 0 8px rgba(150,0,15,.5))!important;animation:horGlow 20s infinite!important}
+body[data-skin="horror"] .w2{color:#b8423e!important;text-shadow:0 0 2px #000,0 0 6px rgba(150,0,15,.4)!important;opacity:.85;animation:horGlow 20s infinite!important}
+@keyframes horGlow{0%{opacity:.92}5%{opacity:.86}10%{opacity:.93}15%{opacity:.88}20%{opacity:.94}25%{opacity:.87}30%{opacity:.92}35%{opacity:.85}40%{opacity:.93}45%{opacity:.88}50%{opacity:.92}55%{opacity:.86}60%{opacity:.93}65%{opacity:.87}70%{opacity:.92}75%{opacity:.88}80%{opacity:.93}85%{opacity:.86}90%{opacity:.92}
+  92%{opacity:.92}92.4%{opacity:.08}93.2%{opacity:.08}93.6%{opacity:.75}94%{opacity:.1}94.8%{opacity:.92}100%{opacity:.92}}
+
 body[data-skin="psy"]{--neon:#3dffb0;--lcd:#0c0a1a;--lcd-fg:#d8ffef;--fg:#ffffff;--mute:#d8c8ff;--font-ui:"Righteous","Exo 2",sans-serif}
 html:has(body[data-skin="psy"]),body[data-skin="psy"]{background:radial-gradient(circle at 15% 20%,#3dffb0 0,transparent 30%),radial-gradient(circle at 85% 80%,#ff4fd8 0,transparent 35%),radial-gradient(circle at 80% 15%,#8b5cff 0,transparent 30%),radial-gradient(circle at 20% 85%,#20e6e8 0,transparent 30%),#2a1650}
 body[data-skin="psy"] .stage::before{border:2px solid rgba(255,255,255,.35);box-shadow:0 0 30px rgba(139,92,255,.6)}

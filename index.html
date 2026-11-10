@@ -947,6 +947,11 @@ body[data-skin="psy"] .bline{visibility:hidden}
           </div>
         </div>
         <div class="sgroup">
+          <h3>Mode léger</h3>
+          <p class="snote">Si le son crépite sur ton téléphone : coupe les animations du thème (scintillements, sang, néons qui bougent…) et ralentit le dessin des écrans. Le son garde toute la puissance du téléphone. Le thème reste, il ne bouge plus.</p>
+          <button class="dbtn" id="lite" aria-pressed="false" style="width:max-content">Activer le mode léger</button>
+        </div>
+        <div class="sgroup">
           <h3>Rapport de mix</h3>
           <p class="snote">Si un mix part décalé : copie ce rapport juste après et colle-le dans la conversation avec Claude. Il contient les mesures de l'analyse et du lancement (aucun son, aucun fichier).</p>
           <button class="dbtn" id="diag-copy">Copier le rapport</button>
@@ -980,6 +985,9 @@ body[data-skin="psy"] .bline{visibility:hidden}
 #visinfo b{font-size:clamp(16px,3.2vw,30px);letter-spacing:.06em}
 #visinfo span{font-size:clamp(11px,1.8vw,16px);opacity:.75;letter-spacing:.12em;text-transform:uppercase}
 #vishint{position:absolute;top:3%;left:0;right:0;text-align:center;color:#fff;opacity:.55;font:500 13px var(--font-ui,sans-serif);letter-spacing:.1em;transition:opacity 1.2s;pointer-events:none}
+/* Mode léger : plus aucune animation ni flou calculé en direct */
+body.lite *, body.lite *::before, body.lite *::after { animation: none !important; transition: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+#lite[aria-pressed="true"] { outline: 2px solid currentColor; }
 </style>
 
 <script>
@@ -1006,7 +1014,10 @@ function toast(msg, ms = 4200){ const t = $('toast'); t.textContent = msg; t.hid
 
 /* ---------- Audio : bus public et bus casque ---------- */
 const AC = window.AudioContext || window.webkitAudioContext;
-const ctx = new AC({latencyHint:'playback'});
+// Réserve de son : sur téléphone on demande un tampon plus grand (≈ 80 ms) → beaucoup moins de crépitements.
+// Les lancements restent calés : tout est programmé sur l'horloge audio avec cette marge.
+const MOBILE = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+let ctx; try { ctx = new AC({latencyHint: MOBILE ? 0.08 : 'playback'}); } catch(e){ ctx = new AC({latencyHint:'playback'}); }
 const gain = v => { const g = ctx.createGain(); g.gain.value = v; return g; };
 const masterBus = gain(0.75);
 const limiter = ctx.createDynamicsCompressor();
@@ -1474,7 +1485,7 @@ class Deck {
     this.flWet = gain(0); this.post.connect(this.flD); this.flD.connect(this.flWet); this.flWet.connect(this.out);
     // Chorus
     this.chWet = gain(0); this.chWet.connect(this.out); this.chL = [];
-    [[0.022, 1], [0.017, 0.63]].forEach(([base, k]) => { const dl = c.createDelay(0.06); dl.delayTime.value = base; const l = lfo(k, 0.004, dl.delayTime); l.k = k; this.chL.push(l); this.post.connect(dl); dl.connect(this.chWet); });
+    [[0.022, 1], [0.017, 0.63]].forEach(([base, k]) => { const dl = c.createDelay(0.06); dl.delayTime.value = base; const l = lfo(k, 0.004, dl.delayTime); l.k = k; this.chL.push(l); (this.chIn = this.chIn || []).push(dl); this.post.connect(dl); dl.connect(this.chWet); });
     // Écho
     this.ecD = c.createDelay(4); this.ecD.delayTime.value = 0.37;
     const ecLp = c.createBiquadFilter(); ecLp.type = 'lowpass'; ecLp.frequency.value = 3600;
@@ -1496,7 +1507,7 @@ class Deck {
     this.post.connect(this.dlD); this.dlD.connect(this.dlFb); this.dlFb.connect(this.dlD); this.dlD.connect(this.dlWet); this.dlWet.connect(this.out);
     // Ping Pong : gauche / droite en alternance
     { this.ppL = c.createDelay(4); this.ppR = c.createDelay(4); this.ppFb = gain(0.5); const mg = c.createChannelMerger(2); this.ppWet = gain(0); const mono = gain(0.5);
-      this.post.connect(mono); mono.connect(this.ppL); this.ppL.connect(mg, 0, 0); this.ppL.connect(this.ppR); this.ppR.connect(mg, 0, 1); this.ppR.connect(this.ppFb); this.ppFb.connect(this.ppL);
+      this.ppIn = mono; this.post.connect(mono); mono.connect(this.ppL); this.ppL.connect(mg, 0, 0); this.ppL.connect(this.ppR); this.ppR.connect(mg, 0, 1); this.ppR.connect(this.ppFb); this.ppFb.connect(this.ppL);
       mg.connect(this.ppWet); this.ppWet.connect(this.out); }
     // Spiral : écho dont le temps de retard tourne (les répétitions montent et descendent)
     this.spD = c.createDelay(4); this.spFb = gain(0.6); this.spWet = gain(0); this.spL = lfo(0.25, 0.01, this.spD.delayTime);
@@ -1522,7 +1533,12 @@ class Deck {
     // Noise : souffle blanc filtré ajouté (montée)
     { if (!NOISE_BUF){ NOISE_BUF = c.createBuffer(1, c.sampleRate * 2, c.sampleRate); const nd = NOISE_BUF.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1; }
       const ns = c.createBufferSource(); ns.buffer = NOISE_BUF; ns.loop = true; this.nzF = c.createBiquadFilter(); this.nzF.type = 'highpass'; this.nzF.frequency.value = 1000; this.nzF.Q.value = 2;
-      this.nzWet = gain(0); ns.connect(this.nzF); this.nzF.connect(this.nzWet); this.nzWet.connect(this.out); ns.start(); }
+      this.nzWet = gain(0); this.nzSrc = ns; ns.connect(this.nzF); this.nzF.connect(this.nzWet); this.nzOn = true; this.nzWet.connect(this.out); ns.start(); }
+    // Économie : chaque effet n'est alimenté que lorsqu'il sert (sinon ~60 traitements calculent pour rien)
+    this.fxIn = {flanger: [this.flD], chorus: this.chIn, echo: [this.ecD], crush: [this.crush], delay: [this.dlD], pingpong: [this.ppIn], spiral: [this.spD], helix: [this.hxD], roll: [this.rlIn], phaser: [this.phAp[0]], filter: [this.afF]};
+    this.fxLive = {}; this.fxOffT = {};
+    for (const k in this.fxIn) for (const n of this.fxIn[k]) try { this.post.disconnect(n); } catch(e){}
+    try { this.nzF.disconnect(this.nzWet); } catch(e){} this.nzOn = false;
   }
   makeIR(sec){
     sec = Math.round(sec * 4) / 4; if (sec === this.irLen) return; this.irLen = sec;
@@ -1578,7 +1594,18 @@ class Deck {
       this.nudging = false; this.nudgeEnd = ctx.currentTime;
     }, (tEnd - ctx.currentTime) * 1000 + 30);
   }
+  // Branche / débranche l'entrée d'un effet (débranchement 5 s après coupure : on laisse finir la queue de l'écho)
+  fxGate(k, on){
+    if (k === 'noise'){ if (on && !this.nzOn){ this.nzF.connect(this.nzWet); this.nzOn = true; } else if (!on && this.nzOn){ clearTimeout(this.fxOffT.nz); this.fxOffT.nz = setTimeout(() => { if (this.fx !== 'noise' || this.fxAmt < 0.002){ try { this.nzF.disconnect(this.nzWet); } catch(e){} this.nzOn = false; } }, 800); } return; }
+    const ins = this.fxIn && this.fxIn[k]; if (!ins) return;
+    if (on){ clearTimeout(this.fxOffT[k]); if (!this.fxLive[k]){ ins.forEach(n => this.post.connect(n)); this.fxLive[k] = true; } }
+    else if (this.fxLive[k] && !this.fxOffT[k + '_p']){
+      clearTimeout(this.fxOffT[k]);
+      this.fxOffT[k] = setTimeout(() => { if (!(this.fx === k && this.fxAmt > 0.002) && !this.fxHold?.[k]){ ins.forEach(n => { try { this.post.disconnect(n); } catch(e){} }); this.fxLive[k] = false; } }, 5000);
+    }
+  }
   applyFx(){
+    if (this.fxIn){ for (const k in this.fxIn) this.fxGate(k, this.fx === k && this.fxAmt > 0.002); this.fxGate('noise', this.fx === 'noise' && this.fxAmt > 0.002); }
     const a = this.fxAmt, r = this.fxRate, fb = this.fxFb, now = ctx.currentTime, T = 0.04, on = n => this.fx === n ? 1 : 0;
     // Flanger : RATE = vitesse du balayage, FEEDBACK = résonance
     this.flL.o.frequency.setTargetAtTime(0.05 * Math.pow(40, r), now, T);
@@ -1965,12 +1992,14 @@ xfCtl.set(50, 'force');
       basses de B à fond, basses de A baissées (-14 dB).
    4. A reste mélangé quelques mesures puis s'efface temps par temps.
       Si B coupe ses basses pour un break / une montée, A est coupé au même moment. */
+let LITE = false;
 let auto = false, plan = null, transBeats = 32, waitFree = null, endOfList = false;
 // Un effet différent à chaque mix, comme un DJ
 const STYLES = [['clean', 'CFX']];
 let mixCount = Math.floor(Math.random() * STYLES.length);
 function fxAt(d, v, t, tc = 0.05){
   const a = v.amt || 0, nm = v.name, set = (g, x) => g.gain.setTargetAtTime(x, t, tc);
+  if (d.fxIn && nm && d.fxIn[nm]){ d.fxHold = d.fxHold || {}; if (a > 0){ d.fxHold[nm] = true; d.fxGate(nm, true); } else { d.fxHold[nm] = false; d.fxGate(nm, false); } }
   set(d.flWet, nm === 'flanger' ? a * 0.85 : 0); set(d.chWet, 0); set(d.rvWet, 0);
   set(d.ecWet, nm === 'echo' ? a * 0.85 : 0); set(d.crWet, nm === 'crush' ? a : 0);
   [d.dlWet, d.ppWet, d.spWet, d.hxWet, d.rlWet, d.phWet, d.afWet, d.nzWet].forEach(g => set(g, 0)); if (d.rollOn){ d.rlFb.gain.setTargetAtTime(0, t, 0.05); d.rollOn = false; }
@@ -2224,6 +2253,7 @@ function diagPlan(p){
 }
 function finishTransition(){
   if (plan) diagPlan(plan);
+  try { earStop(); } catch(e){}
   const {o, n} = plan, manual = plan.manual; plan = null;
   restoreDeck(o);
   // B toujours à fond à la fin du mix (même si A s'est arrêté avant la basse de B)
@@ -2243,25 +2273,76 @@ function finishTransition(){
    l'analyse, la latence du téléphone ou les marqueurs. Pendant l'intro de B (basses coupées, volume bas),
    un ou deux petits coups de pitch le recalent, comme un DJ au casque. Après le swap des basses, on n'y touche plus. */
 const EAR = {n: 12000, a: null, b: null, w: 0, node: null, ea: 0, eb: 0, acc: [0, 0], c: 0, hop: 0, la: 0, lb: 0};
+// Version moderne : l'écoute tourne dans le fil audio (AudioWorklet), pas sur l'écran → plus de craquements.
+// Elle n'est branchée QUE pendant un mix (startTransition → finishTransition).
+const EAR_SRC = `class WkEar extends AudioWorkletProcessor{
+  constructor(){ super(); this.h = Math.round(sampleRate / 1000); this.c = 0; this.sa = 0; this.sb = 0; this.buf = new Float32Array(64); this.k = 0; }
+  process(inp){
+    const x = inp[0], xa = x && x[0], xb = x && x[1];
+    const L = xa ? xa.length : 128;
+    for (let i = 0; i < L; i++){
+      const va = xa ? xa[i] : 0, vb = xb ? xb[i] : 0;
+      this.sa += va * va; this.sb += vb * vb;
+      if (++this.c === this.h){
+        this.buf[this.k++] = Math.sqrt(this.sa / this.h); this.buf[this.k++] = Math.sqrt(this.sb / this.h);
+        this.sa = this.sb = 0; this.c = 0;
+        if (this.k === 64){ this.port.postMessage(this.buf.slice(0)); this.k = 0; }
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('wk-ear', WkEar);`;
+let earReady = null;
+function earLoad(){
+  if (earReady || !ctx.audioWorklet) return earReady;
+  try { earReady = ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([EAR_SRC], {type: 'application/javascript'}))).then(() => true, () => false); } catch(e){ earReady = Promise.resolve(false); }
+  return earReady;
+}
+function earPush(va, vb){
+  const k = EAR.w % EAR.n;
+  // attaque = saut d'énergie (en log) par rapport aux 15 ms d'avant : un seul pic net au tout début de chaque kick
+  EAR.a[k] = Math.max(0, Math.log((va + 1e-4) / (EAR.la + 1e-4))); EAR.b[k] = Math.max(0, Math.log((vb + 1e-4) / (EAR.lb + 1e-4)));
+  EAR.la += (va - EAR.la) / 15; EAR.lb += (vb - EAR.lb) / 15; EAR.w++;
+}
 function ensureEar(){
-  if (EAR.node) return;
-  EAR.a = new Float32Array(EAR.n); EAR.b = new Float32Array(EAR.n); EAR.hop = Math.round(ctx.sampleRate / 1000);
-  const mg = ctx.createChannelMerger(2), sp = ctx.createScriptProcessor(2048, 2, 1), mute = ctx.createGain(); mute.gain.value = 0;
-  decks.A.input.connect(mg, 0, 0); decks.B.input.connect(mg, 0, 1); mg.connect(sp); sp.connect(mute); mute.connect(ctx.destination);
+  if (EAR.node || EAR.pending) return;
+  if (!EAR.a){ EAR.a = new Float32Array(EAR.n); EAR.b = new Float32Array(EAR.n); EAR.hop = Math.round(ctx.sampleRate / 1000); }
+  EAR.w = 0; EAR.la = EAR.lb = 0; EAR.acc[0] = EAR.acc[1] = 0; EAR.c = 0;   // on repart à neuf à chaque mix
+  if (!EAR.mg){ EAR.mg = ctx.createChannelMerger(2); EAR.mute = ctx.createGain(); EAR.mute.gain.value = 0; EAR.mute.connect(ctx.destination); }
+  const plug = node => { decks.A.input.connect(EAR.mg, 0, 0); decks.B.input.connect(EAR.mg, 0, 1); EAR.mg.connect(node); node.connect(EAR.mute); EAR.node = node; };
+  const p = earLoad();
+  if (p){
+    EAR.pending = true;
+    p.then(ok => {
+      EAR.pending = false; if (!plan) return;
+      if (ok){
+        try {
+          const wn = new AudioWorkletNode(ctx, 'wk-ear', {numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1], channelCount: 2, channelCountMode: 'explicit'});
+          wn.port.onmessage = e => { const d = e.data; for (let i = 0; i < d.length; i += 2) earPush(d[i], d[i + 1]); };
+          plug(wn); return;
+        } catch(e){}
+      }
+      earLegacy(plug);
+    });
+  } else earLegacy(plug);
+}
+function earLegacy(plug){   // vieux navigateurs : ancienne méthode
+  const sp = ctx.createScriptProcessor(4096, 2, 1);
   sp.onaudioprocess = e => {
     const xa = e.inputBuffer.getChannelData(0), xb = e.inputBuffer.getChannelData(1), h = EAR.hop;
     for (let i = 0; i < xa.length; i++){
       EAR.acc[0] += xa[i] * xa[i]; EAR.acc[1] += xb[i] * xb[i];
-      if (++EAR.c === h){
-        const va = Math.sqrt(EAR.acc[0] / h), vb = Math.sqrt(EAR.acc[1] / h), k = EAR.w % EAR.n;
-        // attaque = saut d'énergie (en log) par rapport aux 15 ms d'avant : un seul pic net au tout début de chaque kick
-        EAR.a[k] = Math.max(0, Math.log((va + 1e-4) / (EAR.la + 1e-4))); EAR.b[k] = Math.max(0, Math.log((vb + 1e-4) / (EAR.lb + 1e-4)));
-        EAR.la += (va - EAR.la) / 15; EAR.lb += (vb - EAR.lb) / 15;
-        EAR.acc[0] = EAR.acc[1] = 0; EAR.c = 0; EAR.w++;
-      }
+      if (++EAR.c === h){ earPush(Math.sqrt(EAR.acc[0] / h), Math.sqrt(EAR.acc[1] / h)); EAR.acc[0] = EAR.acc[1] = 0; EAR.c = 0; }
     }
   };
-  EAR.node = sp;
+  plug(sp);
+}
+function earStop(){
+  const nd = EAR.node; if (!nd) return; EAR.node = null;
+  try { decks.A.input.disconnect(EAR.mg); } catch(e){} try { decks.B.input.disconnect(EAR.mg); } catch(e){}
+  try { EAR.mg.disconnect(nd); } catch(e){} try { nd.disconnect(); } catch(e){}
+  if (nd.port) nd.port.onmessage = null; else nd.onaudioprocess = null;
 }
 // Écart entendu (s) entre le son qui entre et celui qui sort, sur les « sec » dernières secondes ; > 0 = celui qui entre est en retard
 function earLag(n, sec, beat){
@@ -2457,7 +2538,7 @@ document.addEventListener('keydown', e => { if (VIS.on && e.key === 'Escape') vi
 const visFreq = new Uint8Array(512), visWave = new Uint8Array(1024);
 function visFrame(){
   if (!VIS.on) return;
-  const cv = $('viscv'), dpr = Math.min(2, devicePixelRatio || 1), W = Math.round(cv.clientWidth * dpr), H = Math.round(cv.clientHeight * dpr);
+  const cv = $('viscv'), dpr = LITE ? 1 : Math.min(2, devicePixelRatio || 1), W = Math.round(cv.clientWidth * dpr), H = Math.round(cv.clientHeight * dpr);
   if (cv.width !== W || cv.height !== H){ cv.width = W; cv.height = H; }
   const g = cv.getContext('2d'), cx = W / 2, cy = H / 2, R0 = Math.min(W, H) * 0.2;
   masterAn.getByteFrequencyData(visFreq); masterAn.getByteTimeDomainData(visWave);
@@ -2499,7 +2580,7 @@ function visFrame(){
   g.globalAlpha = 0.2 + bass * 0.6; g.fillStyle = core; g.beginPath(); g.arc(cx, cy, Rb * 0.8, 0, Math.PI * 2); g.fill();
   // étincelles sur les aigus et les kicks
   const spawn = Math.floor(hi * 14 + kick * 40);
-  for (let k = 0; k < spawn && VIS.parts.length < 600; k++){
+  for (let k = 0; k < spawn && VIS.parts.length < (LITE ? 150 : 600); k++){
     const a = Math.random() * Math.PI * 2, sp = (2 + Math.random() * 6 + bass * 10) * dpr;
     VIS.parts.push({x: cx + Math.cos(a) * Rb, y: cy + Math.sin(a) * Rb, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, l: 1, c: Math.random() < 0.5 ? ca : cb});
   }
@@ -3163,7 +3244,7 @@ function phaseLock(){
 }
 
 function frame(now){
-  if (now - lastDraw < 32){ autoTick(); requestAnimationFrame(frame); return; }
+  if (now - lastDraw < (LITE ? 66 : 32)){ autoTick(); requestAnimationFrame(frame); return; }
   lastDraw = now;
   autoTick();
   phaseLock();
@@ -3195,6 +3276,17 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+function setLite(on){
+  LITE = !!on; document.body.classList.toggle('lite', LITE);
+  const b = $('lite'); b.setAttribute('aria-pressed', LITE); b.textContent = LITE ? 'Mode léger activé — désactiver' : 'Activer le mode léger';
+  try { localStorage.setItem('wartek-lite', LITE ? '1' : '0'); } catch(e){}
+}
+$('lite').addEventListener('click', () => setLite(!LITE));
+try { setLite(localStorage.getItem('wartek-lite') === '1'); } catch(e){ setLite(false); }
+// on prépare l'oreille du mix (AudioWorklet) dès le démarrage, pour qu'elle soit prête au premier mix
+try { earLoad(); } catch(e){}
+// sécurité : si un mix est annulé en route, l'oreille se débranche
+setInterval(() => { if (!plan && EAR.node) earStop(); }, 2000);
 let savedSkin = 'neon'; try { savedSkin = localStorage.getItem('wartek-skin') || 'neon'; } catch(e){}
 applySkin(savedSkin);
 

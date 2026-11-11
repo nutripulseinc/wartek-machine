@@ -2022,17 +2022,31 @@ function restoreDeck(d){
 // Présence de la ligne de basse, mesure par mesure : on mesure les basses ENTRE les coups de grosse caisse
 // (de 35 % à 95 % de chaque temps), sinon le kick masque tout.
 // Point C automatique (coupure du son qui sort) :
-// 2 × 32 temps après le swap des basses (B2 de A) ; si A coupe avant (F, fin de sa basse), C tombe pile sur cette coupure.
-function autoCutTime(P, beat, F){
+// on compte 2 × 32 temps après B2, puis on se cale sur la SORTIE du bloc : la 1re basse qui repart juste après
+// le petit creux de fin de phrase (B2 + 64 temps, sinon +80, sinon +96 temps). Pas de creux trouvé : B2 + 64 temps.
+// Si A coupe avant (F, fin de sa basse), C tombe pile sur cette coupure.
+function autoCutTime(P, beat, F, t){
   const tgt = P + 64 * beat;
-  return (F != null && F >= P + 4 * beat && F < tgt - beat * 0.5) ? F : tgt;
+  if (F != null && F >= P + 4 * beat && F < tgt - beat * 0.5) return F;
+  const pk = t && t.peaks; if (!pk) return tgt;
+  const n = pk.lo.length, med = (arr, s0, s1) => { const v = Array.from(arr.subarray(Math.max(0, s0), Math.min(n, s1))).sort((x, y) => x - y); return v[Math.floor(v.length / 2)] || 1e-6; };
+  const s0 = Math.floor(P * RES), s1 = Math.floor((P + 96 * beat) * RES), mLo = med(pk.lo, s0, s1), mRm = med(pk.rms, s0, s1);
+  const bx = tm => { const a = Math.floor((tm + 0.1 * beat) * RES), b = Math.floor((tm + 0.9 * beat) * RES); let acc = 0, c = 0; for (let i = Math.max(0, a); i < Math.min(n, b); i++){ acc += pk.lo[i] / mLo + pk.rms[i] / mRm; c++; } return c ? acc / c : 0; };
+  const end = Math.min(F != null ? F : Infinity, t.buffer ? t.buffer.duration - 4 * beat : Infinity);
+  for (let j = 0; j <= 2; j++){
+    const c = tgt + j * 16 * beat; if (c > end) break;
+    const ref = []; for (let q = 3; q <= 16; q++) ref.push(bx(c - q * beat)); ref.sort((x, y) => x - y);
+    const r = ref[Math.floor(ref.length / 2)] || 0, pre = Math.min(bx(c - beat), bx(c - 2 * beat)), post = bx(c);
+    if (r > 0 && pre < 0.8 * r && post > 1.2 * pre) return c;   // creux juste avant, la basse repart sur c
+  }
+  return tgt;
 }
 // C à afficher sur la platine : celui posé à la main, sinon le C automatique calculé depuis B2
 function cutMarkOf(t){
   if (!t) return null;
   if (t.markers && t.markers.cut != null) return t.markers.cut;
   const st = t.struct; if (!st || st.lastBass == null || !t.bpm) return null;
-  return autoCutTime(st.lastBass, 60 / t.bpm, st.outro);
+  return autoCutTime(st.lastBass, 60 / t.bpm, st.outro, t);
 }
 function barEnergy(t){
   if (t.barE) return t.barE;
@@ -2119,7 +2133,7 @@ function makePlan(o, n){
   const postBars = clamp(roomBars, 1, 16);
   // Point C : 2 × 32 temps après le swap ; si A coupe avant (F), C = pile la coupure de A.
   let cutBar = null, cutBars;
-  { const ct = autoCutTime(P, ob, so.outro); cutBars = Math.max(1, Math.min((ct - P) / (4 * ob), roomBars)); }
+  { const ct = autoCutTime(P, ob, so.outro, o.item); cutBars = Math.max(1, Math.min((ct - P) / (4 * ob), roomBars)); }
   { const mc = o.item.markers && o.item.markers.cut; if (mc != null){ const cb = (mc - P) / (4 * ob); if (cb >= 0.25){ cutBars = Math.min(cb, roomBars); cutBar = null; } } }   // C posé à la main : à l'endroit exact   // C posé dans l'éditeur
   return {o, n, rate: r, synced, useB2, why, cutBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + cutBars * 4 + 8, style: STYLES[mixCount % STYLES.length], scheduled: false};
@@ -2411,7 +2425,7 @@ function edFit(cv){ const r = cv.getBoundingClientRect(), w = Math.max(10, Math.
 function edDraw(){
   const t = ED.t; if (!t || $('editor').hidden) return;
   const dur = t.buffer.duration, T = edT();
-  const cAuto = ED.m.cut == null && ED.m.bass2 != null ? autoCutTime(ED.m.bass2, T, ED.m.out) : null;
+  const cAuto = ED.m.cut == null && ED.m.bass2 != null ? autoCutTime(ED.m.bass2, T, ED.m.out, t) : null;
   // vue d'ensemble
   { const cv = $('ed-over'), g = edFit(cv), W = cv.width, H = cv.height, pk = t.peaks;
     g.fillStyle = C.lcd; g.fillRect(0, 0, W, H);
@@ -2446,7 +2460,7 @@ function edDraw(){
     if (ED.src){ const p = ED.srcOff + (ctx.currentTime - ED.srcT0); g.fillStyle = '#ffb13d'; g.fillRect((p - v0) / px - 1, 0, 2, H); } }
   $('ed-bpm').textContent = ED.bpm.toFixed(2);
   const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
-  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (B2 + 64 temps ou coupure F)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
+  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (sortie des 2 × 32 temps après B2, ou coupure F)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
 }
 function edStop(){ if (ED.src){ try { ED.src.stop(); } catch(e){} ED.src = null; } cancelAnimationFrame(ED.raf); $('ed-play').classList.remove('on'); $('ed-play').textContent = '▶ Écouter'; edDraw(); }
 function edPlay(){

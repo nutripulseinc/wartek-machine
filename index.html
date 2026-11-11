@@ -2021,6 +2021,19 @@ function restoreDeck(d){
 
 // Présence de la ligne de basse, mesure par mesure : on mesure les basses ENTRE les coups de grosse caisse
 // (de 35 % à 95 % de chaque temps), sinon le kick masque tout.
+// Point C automatique (coupure du son qui sort) :
+// 2 × 32 temps après le swap des basses (B2 de A) ; si A coupe avant (F, fin de sa basse), C tombe pile sur cette coupure.
+function autoCutTime(P, beat, F){
+  const tgt = P + 64 * beat;
+  return (F != null && F >= P + 4 * beat && F < tgt - beat * 0.5) ? F : tgt;
+}
+// C à afficher sur la platine : celui posé à la main, sinon le C automatique calculé depuis B2
+function cutMarkOf(t){
+  if (!t) return null;
+  if (t.markers && t.markers.cut != null) return t.markers.cut;
+  const st = t.struct; if (!st || st.lastBass == null || !t.bpm) return null;
+  return autoCutTime(st.lastBass, 60 / t.bpm, st.outro);
+}
 function barEnergy(t){
   if (t.barE) return t.barE;
   const beat = 60 / t.bpm, nb = Math.floor((t.buffer.duration - t.firstBeat) / (4 * beat)), lo = t.peaks.lo, e = [];
@@ -2104,15 +2117,9 @@ function makePlan(o, n){
   // - sinon A reste avec B jusqu'à la fin de sa basse (F), 16 mesures au plus, calé par blocs de 4 mesures.
   const roomBars = Math.max(1, Math.floor((E - P) / (4 * ob)));
   const postBars = clamp(roomBars, 1, 16);
-  // Point C = la vraie coupure de A (fin de sa basse, F) : A joue jusqu'au bout de sa ligne, pas de coupe au milieu.
-  // Seulement si F est introuvable / trop loin : on regarde si B part en break.
+  // Point C : 2 × 32 temps après le swap ; si A coupe avant (F), C = pile la coupure de A.
   let cutBar = null, cutBars;
-  const toF = Math.round((so.outro - P) / (4 * ob));
-  if (toF >= 1 && toF <= 32) cutBars = Math.min(toF, roomBars);
-  else {
-    for (let k = 2; k <= postBars && dBar + k + 1 < eB.length; k++){ if (eB[dBar + k] < 0.4 * refE && eB[dBar + k + 1] < 0.4 * refE){ cutBar = k; break; } }
-    cutBars = cutBar || Math.min(16, roomBars);
-  }
+  { const ct = autoCutTime(P, ob, so.outro); cutBars = Math.max(1, Math.min((ct - P) / (4 * ob), roomBars)); }
   { const mc = o.item.markers && o.item.markers.cut; if (mc != null){ const cb = (mc - P) / (4 * ob); if (cb >= 0.25){ cutBars = Math.min(cb, roomBars); cutBar = null; } } }   // C posé à la main : à l'endroit exact   // C posé dans l'éditeur
   return {o, n, rate: r, synced, useB2, why, cutBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + cutBars * 4 + 8, style: STYLES[mixCount % STYLES.length], scheduled: false};
@@ -2208,7 +2215,15 @@ function startTransition(dt){
   mixCount++;
   const c0 = Math.max(now + 0.05, tDrop - span * beat), cn = Math.round((tDrop - c0) / beat);
   for (let i = 1; i <= cn; i++) schedule(o, 'filt', Math.round(cfx * (cfx > 0 ? 45 : 40) * Math.pow(i / cn, 1.4)), c0 + i * beat, longMix ? 0.08 : 0.04);
-  schedule(o, 'filt', cfx > 0 ? 60 : -60, tDrop + beat, 0.12);
+  // Après le swap (basses de A coupées) jusqu'à C : A s'efface tout doucement, temps par temps,
+  // sur toute la longueur swap → coupure : CFX qui descend un peu, médiums et aigus qui baissent légèrement (sans excès).
+  { const nC = Math.max(1, Math.round(plan.cutBars * 4)), fStart = cfx > 0 ? 45 : -40, fEnd = cfx > 0 ? 58 : -52;
+    for (let i = 1; i <= nC; i++){
+      const f = i / nC, t = tDrop + i * beat;
+      schedule(o, 'filt', Math.round(fStart + (fEnd - fStart) * f), t, 0.15);
+      if (i % 2 === 0 || i === nC){ schedule(o, 'mid', Math.round(-6 * f), t, 0.2); schedule(o, 'hi', Math.round(-4 - 4 * f), t, 0.2); }
+    }
+    plan.sortie = `A s'efface sur ${nC} temps : CFX ${fStart}→${fEnd}, médiums 0→-6 dB, aigus -4→-8 dB`; }
   if (st === 'flanger'){
     for (let i = 0; i <= n8; i += 2) schedule(o, 'fx', {name: 'flanger', amt: 0.1 + 0.55 * i / Math.max(1, n8)}, pre8 + i * beat, 0.25);
     schedule(o, 'fx', {name: 'flanger', amt: 0.3}, tDrop + 2 * beat, 0.4);
@@ -2220,15 +2235,11 @@ function startTransition(dt){
   // Sortie de A au point C, comme un DJ :
   // - sur un break de B : A coupé net sur le temps ;
   // - sinon A s'efface en douceur sur les 16 temps qui mènent à C, avec juste un voile de reverb.
-  const tCut = tDrop + plan.cutBars * bar, onBreak = !!plan.cutBar;
-  if (onBreak){ schedule(o, 'vol', 0, tCut, 0.02); plan.tFade = tCut; plan.tEnd = tCut + 0.3; }
-  else {
-    // A reste plein jusqu'à sa coupure (C), puis s'efface en 4 temps avec un voile de reverb
-    const t0 = tCut - beat, fb = 5;
-    schedule(o, 'fx', {name: 'reverb', amt: 0.25}, tCut - 2 * beat, 0.3);
-    for (let i = 1; i <= fb; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / fb, 1.5)), t0 + i * beat, 0.1);
-    plan.tFade = t0; plan.tEnd = t0 + fb * beat + 0.3;
-  }
+  const tCut = tDrop + plan.cutBars * bar;
+  // À la coupure C : pas d'arrêt sec ni d'effet fort, A finit de descendre en douceur sur 4 temps
+  { const fb = 4;
+    for (let i = 1; i <= fb; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / fb, 1.3)), tCut + (i - 1) * beat, 0.12);
+    plan.tFade = tCut; plan.tEnd = tCut + fb * beat + 0.3; }
   plan.events.sort((a, b) => a.t - b.t);
   plan.scheduled = true;
 }
@@ -2248,7 +2259,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
     basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
-    grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
+    grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
   if (DIAG.length > 6) DIAG.shift();
 }
 function finishTransition(){
@@ -2400,6 +2411,7 @@ function edFit(cv){ const r = cv.getBoundingClientRect(), w = Math.max(10, Math.
 function edDraw(){
   const t = ED.t; if (!t || $('editor').hidden) return;
   const dur = t.buffer.duration, T = edT();
+  const cAuto = ED.m.cut == null && ED.m.bass2 != null ? autoCutTime(ED.m.bass2, T, ED.m.out) : null;
   // vue d'ensemble
   { const cv = $('ed-over'), g = edFit(cv), W = cv.width, H = cv.height, pk = t.peaks;
     g.fillStyle = C.lcd; g.fillRect(0, 0, W, H);
@@ -2407,6 +2419,7 @@ function edDraw(){
     for (let x = 0; x < W; x++){ const i0 = Math.floor(x / W * pk.hi.length), i1 = Math.max(i0 + 1, Math.floor((x + 1) / W * pk.hi.length)); let m = 0; for (let i = i0; i < i1; i++) if (pk.hi[i] > m) m = pk.hi[i]; const h = m * H * 0.9; g.fillRect(x, (H - h) / 2, 1, h); }
     g.fillStyle = 'rgba(32,230,232,.18)'; g.fillRect(ED.view / dur * W, 0, Math.max(2, ED.span / dur * W), H);
     for (const k in ED_COL){ const v = ED.m[k]; if (v == null) continue; const x = v / dur * W; g.fillStyle = ED_COL[k]; g.fillRect(x - 1.5, 0, 3, H); g.font = 'bold 22px monospace'; g.fillText(ED_LBL[k], x + 4, 22); }
+    if (cAuto != null){ const x = cAuto / dur * W; g.globalAlpha = 0.6; g.fillStyle = ED_COL.cut; for (let y = 0; y < H; y += 10) g.fillRect(x - 1.5, y, 3, 6); g.font = 'bold 22px monospace'; g.fillText('C auto', x + 4, 22); g.globalAlpha = 1; }
     g.fillStyle = '#fff'; g.fillRect(ED.cur / dur * W - 1, 0, 2, H); }
   // zoom, depuis le son brut
   { const cv = $('ed-zoom'), g = edFit(cv), W = cv.width, H = cv.height, sr = t.buffer.sampleRate;
@@ -2428,11 +2441,12 @@ function edDraw(){
     }
     for (const k in ED_COL){ const v = ED.m[k]; if (v == null || v < v0 || v > v0 + sp) continue; const x = (v - v0) / px;
       g.fillStyle = ED_COL[k]; g.fillRect(x - 2, 0, 4, H); g.font = 'bold 28px monospace'; g.fillText(ED_LBL[k], x + 6, 32); }
+    if (cAuto != null && cAuto >= v0 && cAuto <= v0 + sp){ const x = (cAuto - v0) / px; g.globalAlpha = 0.6; g.fillStyle = ED_COL.cut; for (let y = 0; y < H; y += 14) g.fillRect(x - 2, y, 4, 8); g.font = 'bold 28px monospace'; g.fillText('C auto', x + 6, 32); g.globalAlpha = 1; }
     g.fillStyle = '#fff'; g.fillRect((ED.cur - v0) / px - 1.5, 0, 3, H);
     if (ED.src){ const p = ED.srcOff + (ctx.currentTime - ED.srcT0); g.fillStyle = '#ffb13d'; g.fillRect((p - v0) / px - 1, 0, 2, H); } }
   $('ed-bpm').textContent = ED.bpm.toFixed(2);
   const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
-  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? 'auto' : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
+  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (B2 + 64 temps ou coupure F)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
 }
 function edStop(){ if (ED.src){ try { ED.src.stop(); } catch(e){} ED.src = null; } cancelAnimationFrame(ED.raf); $('ed-play').classList.remove('on'); $('ed-play').textContent = '▶ Écouter'; edDraw(); }
 function edPlay(){
@@ -2880,7 +2894,7 @@ function drawZoom(d){
   g.globalAlpha = 1;
   const st = d.item && d.item.struct;
   const k2 = plan && plan.o === d ? plan.oldStart : null;
-  if (st) [[d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'FIN'], [k2, '#ff4fd8', 'K2'], [plan && plan.o === d ? plan.cut : null, '#ffb13d', 'COUPE']].filter(x => x[0] != null).forEach(([tm, col, lb]) => {
+  if (st) [[d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'FIN'], [k2, '#ff4fd8', 'K2'], [plan && plan.o === d ? plan.cut : cutMarkOf(d.item), '#ffb13d', 'COUPE']].filter(x => x[0] != null).forEach(([tm, col, lb]) => {
     const x = (tm - t0) * pps; if (x < 0 || x > W) return;
     g.fillStyle = col; g.fillRect(x - u, top, 2 * u, h);
     g.font = `${Math.round(11 * u)}px ${LCD_FONT}`; g.textBaseline = 'bottom'; g.fillText(lb, x + 3 * u, top + h);
@@ -2922,7 +2936,7 @@ function drawOver(d){
     const ph32 = 32 * d.beatLen, p0 = st.phrase0 ?? d.firstBeat;
     for (let t = p0 - Math.floor((p0 - d.firstBeat) / ph32) * ph32; t < d.duration; t += ph32) o.fillRect(Math.round(t / d.duration * W), 0, Math.max(1, u), H * 0.18);
     o.font = `${Math.round(H * 0.16)}px ${LCD_FONT}`; o.textBaseline = 'top';
-    [[d.firstBeat, '#20e6e8', 'K'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'F']].filter(x => x[0] != null).forEach(([t, col, lb]) => {
+    [[d.firstBeat, '#20e6e8', 'K'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'F'], [cutMarkOf(d.item), '#ffb13d', 'C']].filter(x => x[0] != null).forEach(([t, col, lb]) => {
       const x = Math.round(t / d.duration * W); o.fillStyle = col; o.fillRect(x, 0, 2 * u, H);
       o.fillRect(x, H * 0.2, H * 0.08 * (lb.length + 1), H * 0.18); o.fillStyle = '#031216'; o.fillText(lb, x + H * 0.03, H * 0.21);
     });

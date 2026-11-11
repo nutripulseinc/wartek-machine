@@ -2632,17 +2632,19 @@ function visFrame(){
   if (kick > 0.06) VIS.rings.push({r: R0 * 0.9, a: Math.min(1, kick * 4), c: Math.random() < 0.5 ? ca : cb});
   VIS.rings = VIS.rings.filter(k => k.a > 0.02);
   for (const k of VIS.rings){ k.r *= 1.035 + bass * 0.03; k.a *= 0.94; g.strokeStyle = k.c; g.globalAlpha = k.a; g.lineWidth = 3 * dpr + k.a * 8 * dpr; g.beginPath(); g.arc(cx, cy, k.r, 0, Math.PI * 2); g.stroke(); }
-  // spectre circulaire en miroir
-  const N = 128, Rb = R0 * (1 + bass * 0.35);
-  g.lineWidth = Math.max(1.5, (Math.PI * Rb / N) * 0.7);
+  // spectre circulaire en miroir : FIXE (ne tourne plus), court et collé au rond, en couleurs (plus de grosse tache blanche)
+  const N = 96, Rb = R0 * (1 + bass * 0.35), Rs = Rb * 1.02, maxL = Math.min(W, H) * 0.09;
+  g.globalCompositeOperation = 'source-over';
+  g.lineWidth = Math.max(1.2, (Math.PI * Rs / N) * 0.45); g.lineCap = 'round';
   for (let i = 0; i < N; i++){
-    const v = visFreq[2 + Math.floor(i * 1.8)] / 255, len = v * v * Math.min(W, H) * 0.32;
+    const v = visFreq[2 + Math.floor(i * 2.4)] / 255, len = 2 * dpr + v * v * maxL;
     for (const sgn of [1, -1]){
-      const a = VIS.rot + sgn * (i / N) * Math.PI - Math.PI / 2;
-      g.globalAlpha = 0.35 + v * 0.65; g.strokeStyle = i % 2 ? ca : cb;
-      g.beginPath(); g.moveTo(cx + Math.cos(a) * Rb, cy + Math.sin(a) * Rb); g.lineTo(cx + Math.cos(a) * (Rb + len), cy + Math.sin(a) * (Rb + len)); g.stroke();
+      const a = sgn * (i / N) * Math.PI - Math.PI / 2;
+      g.globalAlpha = 0.25 + v * 0.55; g.strokeStyle = i % 2 ? ca : cb;
+      g.beginPath(); g.moveTo(cx + Math.cos(a) * Rs, cy + Math.sin(a) * Rs); g.lineTo(cx + Math.cos(a) * (Rs + len), cy + Math.sin(a) * (Rs + len)); g.stroke();
     }
   }
+  g.globalCompositeOperation = 'lighter';
   // onde du son autour du cercle
   g.globalAlpha = 0.9; g.lineWidth = 2 * dpr; g.strokeStyle = '#fff'; g.beginPath();
   for (let i = 0; i <= 256; i++){

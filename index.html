@@ -1327,6 +1327,19 @@ function structureOf(t){
     };
     if (m.bass == null && bi > 0) bi = edge(bi);
     if (b2 != null){ const e2 = edge(b2); if (e2 > bi + 4) b2 = e2; }
+    // B2 sur la VRAIE grosse basse : si B2 tombe encore dans la montée (basse présente mais plus légère),
+    // et que 4 ou 8 mesures plus loin, juste après un petit creux, la basse ET la wave sont nettement plus grosses,
+    // on avance B2 là (c'est là que part la grosse ligne de basse après la montée).
+    if (b2 != null && m.bass2 == null){
+      const rs2 = [...r].sort((a, b) => a - b), rRef2 = rs2[Math.floor(nb * 0.75)] || 1e-9, eRef2 = ref || 1e-9;
+      const xv = i => i >= 0 && i < nb ? e[i] / eRef2 + r[i] / rRef2 : 0;
+      const blk = i => (xv(i) + xv(i + 1) + xv(i + 2) + xv(i + 3)) / 4;
+      for (const j of [b2 + 4, b2 + 8]){
+        if (j + 3 >= Math.min(nb, bo)) break;
+        const before = blk(b2), after = blk(j), dip = Math.min(xv(j - 1), xv(j - 2)) < 0.9 * Math.min(xv(j), xv(j + 1));
+        if (after > 1.1 * before && dip && e[j] >= flo + 0.68 * (ref - flo)){ b2 = j; break; }
+      }
+    }
     if (m.out == null && bo < nb){ let best = bo, bs = -Infinity; for (let k = Math.max(bi + 2, bo - 3); k <= Math.min(nb - 1, bo + 3); k++){ const j = (ev(k - 1) + ev(k - 2)) - (ev(k) + ev(k + 1)); if (j > bs + 1e-9){ bs = j; best = k; } } if (bs > 0.2 * (ref - flo)) bo = best; } }
   if (m.bass2 != null) b2 = Math.max(bi, Math.round((m.bass2 - t.firstBeat) / bar));
   const bl = bar / 4, onBeat = x => t.firstBeat + Math.round((x - t.firstBeat) / bl) * bl;

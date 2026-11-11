@@ -2135,8 +2135,15 @@ function makePlan(o, n){
   let cutBar = null, cutBars;
   { const ct = autoCutTime(P, ob, so.outro, o.item); cutBars = Math.max(1, Math.min((ct - P) / (4 * ob), roomBars)); }
   { const mc = o.item.markers && o.item.markers.cut; if (mc != null){ const cb = (mc - P) / (4 * ob); if (cb >= 0.25){ cutBars = Math.min(cb, roomBars); cutBar = null; } } }   // C posé à la main : à l'endroit exact   // C posé dans l'éditeur
-  return {o, n, rate: r, synced, useB2, why, cutBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
-          totalBeats: I + cutBars * 4 + 8, style: STYLES[mixCount % STYLES.length], scheduled: false};
+  // De C à F : A s'atténue par paliers de 16 temps (tailBars). F = fin de la basse de A (ou fin du morceau).
+  const fT = Math.min(so.outro != null && so.outro > P ? so.outro : E, E);
+  const tailBars = Math.max(0, Math.min((fT - (P + cutBars * 4 * ob)) / (4 * ob), roomBars - cutBars));
+  // Si le son qui entre part en break (ses basses s'arrêtent) avant la fin de A : A est coupé NET à ce moment-là
+  { const lim = cutBars + tailBars;
+    for (let k = 2; k < lim && dBar + k + 1 < eB.length; k++){ if (eB[dBar + k] < 0.4 * refE && eB[dBar + k + 1] < 0.4 * refE){ cutBar = k; break; } } }
+  const stopBars = cutBar != null ? cutBar : cutBars + tailBars;
+  return {o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+          totalBeats: I + stopBars * 4 + 8, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
 
@@ -2229,15 +2236,7 @@ function startTransition(dt){
   mixCount++;
   const c0 = Math.max(now + 0.05, tDrop - span * beat), cn = Math.round((tDrop - c0) / beat);
   for (let i = 1; i <= cn; i++) schedule(o, 'filt', Math.round(cfx * (cfx > 0 ? 45 : 40) * Math.pow(i / cn, 1.4)), c0 + i * beat, longMix ? 0.08 : 0.04);
-  // Après le swap (basses de A coupées) jusqu'à C : A s'efface tout doucement, temps par temps,
-  // sur toute la longueur swap → coupure : CFX qui descend un peu, médiums et aigus qui baissent légèrement (sans excès).
-  { const nC = Math.max(1, Math.round(plan.cutBars * 4)), fStart = cfx > 0 ? 45 : -40, fEnd = cfx > 0 ? 58 : -52;
-    for (let i = 1; i <= nC; i++){
-      const f = i / nC, t = tDrop + i * beat;
-      schedule(o, 'filt', Math.round(fStart + (fEnd - fStart) * f), t, 0.15);
-      if (i % 2 === 0 || i === nC){ schedule(o, 'mid', Math.round(-6 * f), t, 0.2); schedule(o, 'hi', Math.round(-4 - 4 * f), t, 0.2); }
-    }
-    plan.sortie = `A s'efface sur ${nC} temps : CFX ${fStart}→${fEnd}, médiums 0→-6 dB, aigus -4→-8 dB`; }
+  // Du swap (B2) jusqu'à C : A reste comme il est (basses coupées, CFX léger du swap), pas de changement.
   if (st === 'flanger'){
     for (let i = 0; i <= n8; i += 2) schedule(o, 'fx', {name: 'flanger', amt: 0.1 + 0.55 * i / Math.max(1, n8)}, pre8 + i * beat, 0.25);
     schedule(o, 'fx', {name: 'flanger', amt: 0.3}, tDrop + 2 * beat, 0.4);
@@ -2246,14 +2245,28 @@ function startTransition(dt){
     for (let i = 0; i <= n8; i += 2) schedule(o, 'fx', {name: 'crush', amt: 0.1 + 0.5 * i / Math.max(1, n8)}, pre8 + i * beat, 0.15);
     schedule(o, 'fx', {name: 'none'}, tDrop, 0.35);
   }
-  // Sortie de A au point C, comme un DJ :
-  // - sur un break de B : A coupé net sur le temps ;
-  // - sinon A s'efface en douceur sur les 16 temps qui mènent à C, avec juste un voile de reverb.
-  const tCut = tDrop + plan.cutBars * bar;
-  // À la coupure C : pas d'arrêt sec ni d'effet fort, A finit de descendre en douceur sur 4 temps
-  { const fb = 4;
-    for (let i = 1; i <= fb; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / fb, 1.3)), tCut + (i - 1) * beat, 0.12);
-    plan.tFade = tCut; plan.tEnd = tCut + fb * beat + 0.3; }
+  // Sortie de A, comme un DJ :
+  // - de C à F : A s'atténue progressivement, un palier tous les 16 temps (CFX qui descend, médiums et aigus qui baissent),
+  //   puis à F il finit de s'éteindre en douceur sur 4 temps ;
+  // - si le son qui entre part en break avant : A coupé NET sur ce temps (on ne le laisse pas tout seul).
+  const tCut = tDrop + plan.cutBars * bar, tailB = Math.round(plan.tailBars * 4), tF = tCut + tailB * beat;
+  const tBreak = plan.cutBar != null ? tDrop + plan.cutBar * bar : null, tStop = tBreak ?? tF;
+  { const steps = Math.max(1, Math.ceil(tailB / 16)), fStart = cfx > 0 ? 45 : -40, fEnd = cfx > 0 ? 62 : -58;
+    for (let s = 1; s <= steps; s++){
+      const t = tCut + (s - 1) * 16 * beat, f = s / steps; if (t >= tStop - 0.01) break;
+      const tc = Math.min(1.2, beat * 1.5);   // chaque palier glisse sur ~1 temps, pas de saut
+      schedule(o, 'filt', Math.round(fStart + (fEnd - fStart) * f), t, tc);
+      schedule(o, 'mid', Math.round(-9 * f), t, tc); schedule(o, 'hi', Math.round(-4 - 6 * f), t, tc);
+    }
+    if (tBreak != null){ schedule(o, 'vol', 0, tBreak, 0.008); plan.tFade = tBreak; plan.tEnd = tBreak + 0.3;
+      plan.sortie = `Break de ${n.id} : ${o.id} coupé net ${Math.round((tBreak - tDrop) / beat)} temps après le swap`; }
+    else {
+      const fb = 4;
+      for (let i = 1; i <= fb; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / fb, 1.3)), tF + (i - 1) * beat, 0.12);
+      plan.tFade = tCut; plan.tEnd = tF + fb * beat + 0.3;
+      plan.sortie = `C→F : ${tailB} temps, ${steps} palier(s) de 16 temps (CFX ${fStart}→${fEnd}, médiums 0→-9 dB, aigus -4→-10 dB), extinction douce à F`;
+    }
+  }
   plan.events.sort((a, b) => a.t - b.t);
   plan.scheduled = true;
 }

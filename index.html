@@ -1314,7 +1314,13 @@ function structureOf(t){
     const big = i => i >= 0 && i < nb && e[i] >= flo + 0.68 * (ref - flo) && r[i] >= 0.8 * rRef;
     const big2 = i => big(i) && big(i + 1);
     const refine = (from, to) => { for (let i = from; i <= to && i < nb - 1; i++) if (big2(i)){ const r4 = Math.round(i / 4) * 4; return Math.abs(i - r4) <= 1 && big(r4) ? r4 : i; } return from; };
-    if (m.bass == null && !big2(bi)) bi = refine(bi, Math.min(bo - 2, bi + 16));
+    // B1 : on ne l'avance vers le « gros » son que si la BASSE elle-même (graves) est encore faible à bi.
+    // Si les graves sont déjà au niveau de plus loin, c'est la vraie 1re basse : B1 reste là.
+    if (m.bass == null && !big2(bi)){
+      const nbi = refine(bi, Math.min(bo - 2, bi + 16));
+      const lv = i => ((e[i] ?? 0) + (e[i + 1] ?? 0)) / 2;
+      if (nbi > bi && lv(bi) < 0.85 * lv(nbi)) bi = nbi;
+    }
     if (b2 != null && !big2(b2)){ const nb2 = refine(b2, Math.min(bo - 2, b2 + 16)); if (nb2 > bi + 4) b2 = nb2; }
     // Bord exact de la ligne de basse, à la mesure près et SANS arrondi aux 4 mesures (sinon une mesure d'avance ou de retard) :
     // niveau de la basse sur les 8 mesures qui suivent, puis 1re mesure qui l'atteint juste après une mesure qui ne l'atteint pas.
@@ -2134,9 +2140,16 @@ function makePlan(o, n){
     if (aStart > E - 4 * ob) aStart = grid(pos + lead, 4 * ob, true);
     I = bgFor(Math.max(0, Math.floor((limit - aStart) / ob)));
   }
+  if (!synced){
+    // Tempos trop éloignés pour caler : pas de K2 inventé. B part sur SON K1 au moment où A coupe (son C),
+    // A s'éteint en 4 temps. Enchaînement propre au lieu d'un faux calage.
+    let cA = cutMarkOf(o.item); if (cA == null || cA > limit) cA = limit;
+    if (cA < pos + lead) cA = grid(pos + lead, 4 * ob, true);
+    aStart = cA; I = 0; why = 'Tempos trop éloignés : B part sur son K1 quand A coupe';
+  }
   const P = aStart + I * ob;
   // B part sur son 1er kick (kick dès le début) ou I temps avant sa basse : son swap tombe pile sur P
-  const bStart = introB === 0 ? nStart : sn.drop - I * nb;
+  const bStart = (introB === 0 || !synced) ? nStart : sn.drop - I * nb;
   const eB = barEnergy(n.item), dBar = Math.max(0, Math.round((bStart + I * nb - n.firstBeat) / (4 * nb)));
   const refE = eB.slice(dBar, dBar + 4).reduce((a, b) => a + b, 0) / Math.max(1, Math.min(4, eB.length - dBar));
   // Point de coupe C du son sortant (en mesures après le swap) :
@@ -2149,8 +2162,9 @@ function makePlan(o, n){
   { const ct = autoCutTime(P, ob, so.outro, o.item); cutBars = Math.max(1, Math.min((ct - P) / (4 * ob), roomBars)); }
   { const mc = o.item.markers && o.item.markers.cut; if (mc != null){ const cb = (mc - P) / (4 * ob); if (cb >= 0.25){ cutBars = Math.min(cb, roomBars); cutBar = null; } } }   // C posé à la main : à l'endroit exact   // C posé dans l'éditeur
   // De C à F : A s'atténue par paliers de 16 temps (tailBars). F = fin de la basse de A (ou fin du morceau).
+  if (!synced){ cutBars = 0.25; }
   const fT = Math.min(so.outro != null && so.outro > P ? so.outro : E, E);
-  const tailBars = Math.max(0, Math.min((fT - (P + cutBars * 4 * ob)) / (4 * ob), roomBars - cutBars));
+  const tailBars = !synced ? 0 : Math.max(0, Math.min((fT - (P + cutBars * 4 * ob)) / (4 * ob), roomBars - cutBars));
   // Si le son qui entre part en break (ses basses s'arrêtent) avant la fin de A : A est coupé NET à ce moment-là
   { const lim = cutBars + tailBars;
     for (let k = 2; k < lim && dBar + k + 1 < eB.length; k++){ if (eB[dBar + k] < 0.4 * refE && eB[dBar + k + 1] < 0.4 * refE){ cutBar = k; break; } } }
@@ -2277,7 +2291,7 @@ function startTransition(dt){
       const fb = 4;
       for (let i = 1; i <= fb; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / fb, 1.3)), tF + (i - 1) * beat, 0.12);
       plan.tFade = tCut; plan.tEnd = tF + fb * beat + 0.3;
-      plan.sortie = `C→F : ${tailB} temps, ${steps} palier(s) de 16 temps (CFX ${fStart}→${fEnd}, médiums 0→-9 dB, aigus -4→-10 dB), extinction douce à F`;
+      plan.sortie = !plan.synced ? `Tempos trop éloignés : ${n.id} lancé sur son K1 à la coupure de ${o.id}, ${o.id} éteint en 4 temps` : tailB === 0 ? `C = F : ${o.id} éteint en douceur sur 4 temps` : `C→F : ${tailB} temps, ${steps} palier(s) de 16 temps (CFX ${fStart}→${fEnd}, médiums 0→-9 dB, aigus -4→-10 dB), extinction douce à F`;
     }
   }
   plan.events.sort((a, b) => a.t - b.t);
@@ -2440,11 +2454,14 @@ function openEditor(d){
   const st = structureOf(t);
   ED.d = d; ED.t = t; ED.bpm = t.bpm; ED.fb = t.firstBeat;
   ED.m = {kick: t.firstBeat, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: t.markers && t.markers.cut != null ? t.markers.cut : null};
+  ED.reset = false; ED.touched = new Set(); $('ed-free').setAttribute('aria-pressed', 'false');   // à l'ouverture : curseur sur les repères de la grille
   ED.cur = d.pos() > 0.5 ? d.pos() : t.firstBeat; ED.span = 4 * 4 * 60 / t.bpm; ED.view = Math.max(0, ED.cur - ED.span / 3);
   $('ed-title').textContent = `Éditeur · ${t.name}`;
   $('editor').hidden = false; requestAnimationFrame(edDraw);
 }
 const edT = () => 60 / ED.bpm;
+// Curseur blanc : collé sur la ligne de temps la plus proche ; en « Mode libre », exactement où on touche
+const edCurSnap = x => $('ed-free').getAttribute('aria-pressed') === 'true' ? x : Math.max(0, ED.fb + Math.round((x - ED.fb) / edT()) * edT());
 const edSnapBar = x => ED.fb + Math.round((x - ED.fb) / (4 * edT())) * 4 * edT();
 const edBarNo = x => x == null ? '—' : Math.round((x - ED.fb) / (4 * edT())) + 1;
 function edFit(cv){ const r = cv.getBoundingClientRect(), w = Math.max(10, Math.round(cv.clientWidth * 1.5)), h = Math.max(10, Math.round(cv.clientHeight * 1.5)); if (cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; } return cv.getContext('2d'); }
@@ -2511,10 +2528,10 @@ function edPlay(){
 { const cv = $('ed-zoom'); let dn = null;
   cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); dn = {x: e.clientX, v: ED.view, moved: false}; });
   cv.addEventListener('pointermove', e => { if (!dn) return; const r = cv.getBoundingClientRect(), dx = e.clientX - dn.x; if (Math.abs(dx) > 6) dn.moved = true; if (dn.moved){ ED.view = clamp(dn.v - dx / r.width * ED.span, -ED.span / 2, ED.t.buffer.duration - ED.span / 2); edDraw(); } });
-  cv.addEventListener('pointerup', e => { if (!dn) return; if (!dn.moved){ const r = cv.getBoundingClientRect(); ED.cur = ED.view + (e.clientX - r.left) / r.width * ED.span; if (ED.src){ edStop(); edPlay(); } edDraw(); } dn = null; });
+  cv.addEventListener('pointerup', e => { if (!dn) return; if (!dn.moved){ const r = cv.getBoundingClientRect(); ED.cur = edCurSnap(ED.view + (e.clientX - r.left) / r.width * ED.span); if (ED.src){ edStop(); edPlay(); } edDraw(); } dn = null; });
   // vue d'ensemble : toucher OU glisser le doigt → le curseur et le zoom suivent
   { const ov = $('ed-over'); let on = false;
-    const go = e => { const r = ov.getBoundingClientRect(); ED.cur = clamp((e.clientX - r.left) / r.width, 0, 1) * ED.t.buffer.duration; ED.view = Math.max(-ED.span / 2, ED.cur - ED.span / 3); edDraw(); };
+    const go = e => { const r = ov.getBoundingClientRect(); ED.cur = edCurSnap(clamp((e.clientX - r.left) / r.width, 0, 1) * ED.t.buffer.duration); ED.view = Math.max(-ED.span / 2, ED.cur - ED.span / 3); edDraw(); };
     ov.addEventListener('pointerdown', e => { on = true; try { ov.setPointerCapture(e.pointerId); } catch(_){} go(e); });
     ov.addEventListener('pointermove', e => { if (on) go(e); });
     ov.addEventListener('pointerup', () => { on = false; if (ED.src){ edStop(); edPlay(); } });
@@ -2527,7 +2544,7 @@ document.addEventListener('click', e => {
   if (b.dataset.bpm) ED.bpm = Math.round((ED.bpm + parseFloat(b.dataset.bpm)) * 100) / 100;
   else if (b.dataset.bpmx) ED.bpm = Math.round(ED.bpm * parseFloat(b.dataset.bpmx) * 100) / 100;
   else if (b.dataset.gs){ const d = parseFloat(b.dataset.gs); ED.fb += d; ED.m.kick = ED.fb; }
-  else { const k = b.dataset.em;
+  else { const k = b.dataset.em; ED.touched.add(k === 'cutx' ? 'cut' : k);
     const free = $('ed-free').getAttribute('aria-pressed') === 'true', T = edT(), snapBeat = x => ED.fb + Math.round((x - ED.fb) / T) * T;
     if (free && k === 'kick'){ ED.fb = ED.cur; ED.m.kick = ED.cur; }
     else if (free && k === 'cut') ED.m.cut = ED.cur;   // C libre : exactement au curseur
@@ -2554,7 +2571,7 @@ $('ed-measure').addEventListener('click', () => {
 });
 $('ed-close').addEventListener('click', () => { edStop(); $('editor').hidden = true; });
 $('ed-auto').addEventListener('click', () => {
-  const t = ED.t; ED.bpm = t.autoBpm || t.bpm; ED.fb = t.autoFb ?? t.firstBeat;
+  const t = ED.t; ED.reset = true; ED.touched = new Set(); ED.bpm = t.autoBpm || t.bpm; ED.fb = t.autoFb ?? t.firstBeat;
   const keep = {bpm: t.bpm, fb: t.firstBeat, m: t.markers, st: t.struct, mg: t.manualGrid};
   t.markers = {}; t.manualGrid = false; t.bpm = ED.bpm; t.firstBeat = t.start = ED.fb; t.struct = null; t.barE = null; t.barR = null;
   const st = structureOf(t);
@@ -2565,8 +2582,13 @@ $('ed-auto').addEventListener('click', () => {
 $('ed-save').addEventListener('click', () => {
   const t = ED.t, d = ED.d; edStop();
   t.bpm = ED.bpm; t.firstBeat = t.start = ED.fb; t.manualGrid = true;
-  t.markers = {bpm: ED.bpm, grid: ED.fb, kick: ED.fb, bass: ED.m.bass, bass2: ED.m.bass2, out: ED.m.out};
-  if (ED.m.cut != null) t.markers.cut = ED.m.cut;
+  // On ne fige que ce qui a été réglé à la main (ou l'était déjà) : le reste reste automatique
+  const old = ED.reset ? {} : (t.markers || {}), nm = {};
+  const gridMan = old.bpm != null || ED.touched.has('kick') || Math.abs(ED.bpm - (t.autoBpm ?? ED.bpm)) > 0.001 || Math.abs(ED.fb - (t.autoFb ?? ED.fb)) > 0.001;
+  if (gridMan){ nm.bpm = ED.bpm; nm.grid = ED.fb; nm.kick = ED.fb; }
+  for (const k of ['bass', 'bass2', 'out']) if ((ED.touched.has(k) || old[k] != null) && ED.m[k] != null) nm[k] = ED.m[k];
+  if (ED.m.cut != null) nm.cut = ED.m.cut;
+  t.markers = nm; if (!gridMan){ t.manualGrid = false; }
   t.struct = null; t.barE = null; t.barR = null; structureOf(t);
   for (const x of Object.values(decks)) if (x.item === t){ x.bpm = t.bpm; x.firstBeat = t.firstBeat; x.overDirty = true; }
   if (t.id) saveTrack(t);
@@ -2877,6 +2899,16 @@ async function loadItem(i, deckId){
       if (!t.peaks) t.peaks = computePeaks(t.buffer);
       { const db = downbeat(t); t.firstBeat = t.start = db.fb; t.dbInfo = db; }
       t.autoBpm = t.bpm; t.autoFb = t.firstBeat;
+      // Garde-fou : une grille / un K gardés en mémoire (anciennes versions) doivent tomber au DÉBUT du son.
+      // Si le K mémorisé est après le début de la wave (ou avant 0), on l'ignore : K et grille repris de l'analyse.
+      if (t.markers && (t.markers.bpm || t.markers.kick != null)){
+        const s0 = t.dbInfo && t.dbInfo.t0 != null ? t.dbInfo.t0 : t.autoFb, g = t.markers.bpm ? (t.markers.grid ?? t.markers.kick) : t.markers.kick;
+        if (g != null && (g < -0.01 || (g - s0 > 0.04 && Math.abs(g - t.autoFb) > 0.03))){
+          delete t.markers.bpm; delete t.markers.grid; delete t.markers.kick;
+          toast(`« ${t.name} » : ancien K mémorisé (${g.toFixed(3)} s) pas au début du son → K et grille remis sur l'analyse (${t.autoFb.toFixed(3)} s).`, 4500);
+          if (t.id) saveTrack(t);
+        }
+      }
       if (t.markers && t.markers.bpm){ t.bpm = t.markers.bpm; t.firstBeat = t.start = t.markers.grid ?? t.firstBeat; t.manualGrid = true; }   // grille réglée à la main dans l'éditeur
       else if (t.markers && t.markers.kick != null){ const bl = 60 / t.bpm; t.firstBeat = t.start = t.firstBeat + Math.round((t.markers.kick - t.firstBeat) / bl) * bl; } }
     d.load(t);

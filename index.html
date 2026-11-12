@@ -2188,10 +2188,13 @@ function makePlan(o, n){
     } }
   const stopBars = cutBar != null ? cutBar : cutBars + tailBars;
   // Trick DJ : à la petite coupure de fin des 32 premiers temps ensemble, on laisse A seul (voir startTransition)
-  let trick = null;
-  if (synced && useB2 && cutBars * 4 >= 36 && (cutBar == null || cutBar >= 9)){
-    const qB = fillStart(n.item, sn.drop, nb), qA = fillStart(o.item, P, ob), q = qB ?? qA;
-    if (q != null) trick = {q, from: qB != null ? n.id : o.id};
+  // Deux tricks possibles : fin des 32 premiers temps ensemble, puis fin des 32 suivants (temps 33 à 64)
+  const trick = [];
+  if (synced && useB2) for (const k of [0, 1]){
+    const end = 32 * (k + 1);
+    if (cutBars * 4 < (k ? end : end + 4) || (cutBar != null && cutBar * 4 < end + 4)) break;
+    const qB = fillStart(n.item, sn.drop + k * 32 * nb, nb), qA = fillStart(o.item, P + k * 32 * ob, ob), q = qB ?? qA;
+    if (q != null) trick.push({q: q + k * 32, end, from: qB != null ? n.id : o.id});
   }
   return {o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + stopBars * 4 + 8, trick, style: STYLES[mixCount % STYLES.length], scheduled: false};
@@ -2327,13 +2330,15 @@ function startTransition(dt){
   // Trick DJ sur la petite coupure de fin des 32 premiers temps :
   // B coupé au fader, A seul (basses remises, CFX à zéro, petit phaser pour habiller),
   // puis pile sur le 1er temps après la coupure : B revient, basses de A recoupées, CFX et effet comme avant.
-  if (plan.trick){
-    const tq = tDrop + plan.trick.q * beat, t32 = tDrop + 32 * beat, fHold = Math.round(cfx * (cfx > 0 ? 45 : 40));
+  const txt = [];
+  for (const tk of plan.trick || []){
+    const tq = tDrop + tk.q * beat, t32 = tDrop + tk.end * beat, fHold = Math.round(cfx * (cfx > 0 ? 45 : 40));
     schedule(n, 'vol', 0, tq, 0.012); schedule(n, 'vol', 100, t32, 0.006);
     schedule(o, 'lo', 0, tq, 0.012); schedule(o, 'filt', 0, tq, 0.02); schedule(o, 'fx', {name: 'phaser', amt: 0.55}, tq, 0.04);
     schedule(o, 'lo', -26, t32, 0.004); schedule(o, 'filt', fHold, t32, 0.02); schedule(o, 'fx', {name: 'phaser', amt: 0}, t32, 0.03);
-    plan.trickTxt = `trick fin des 32 : ${o.id} seul ${32 - plan.trick.q} temps (coupure vue sur ${plan.trick.from})`;
+    txt.push(`fin des ${tk.end} : ${o.id} seul ${tk.end - tk.q} temps (coupure vue sur ${tk.from})`);
   }
+  if (txt.length) plan.trickTxt = txt.join(' · ');
   plan.events.sort((a, b) => a.t - b.t);
   plan.scheduled = true;
 }

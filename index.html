@@ -1310,7 +1310,18 @@ function structureOf(t){
   if (m.out != null) bo = Math.max(bi + 1, Math.round((m.out - t.firstBeat) / bar));
   // B2 : début de la dernière ligne de basse (dernier bloc de basse continu avant la fin)
   let b2 = null;
-  { let i = bo - 1, gap = 0; while (i > bi){ if (e[i] >= thr){ gap = 0; i--; } else if (++gap >= 2) break; else i--; }
+  // Une simple coupure de basse (kicks toujours là, 2-3 mesures) ne coupe pas le bloc : seule une vraie cassure
+  // (break / montée : son vraiment bas, ou 4 mesures et plus sans basse) marque le début de la dernière ligne de basse.
+  { const rq = [...r].sort((x, y) => x - y)[Math.floor(nb * 0.75)] || 1e-9;
+    let i = bo - 1, gap = 0;
+    for (;;){
+      gap = 0; while (i > bi){ if (e[i] >= thr){ gap = 0; i--; } else if (++gap >= 2) break; else i--; }
+      if (i <= bi) break;
+      let j = i + gap - 1, glen = 0, quiet = false;
+      while (j > bi && e[j] < thr){ if (r[j] < 0.35 * rq) quiet = true; glen++; j--; }
+      if (quiet || glen >= 4 || j <= bi) break;
+      i = j;
+    }
     let st = i + gap; const r4 = Math.round(st / 4) * 4; if (Math.abs(st - r4) <= 1) st = r4;
     if (st > bi + 4 && st < bo) b2 = st; }
   // Grosse basse : basses fortes ET son plein (le gros pic de la wave). B1 et B2 sont recalés dessus,

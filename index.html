@@ -952,6 +952,11 @@ body[data-skin="psy"] .bline{visibility:hidden}
           <button class="dbtn" id="lite" aria-pressed="false" style="width:max-content">Activer le mode léger</button>
         </div>
         <div class="sgroup">
+          <h3>Bibliothèque des sons</h3>
+          <p class="snote">« Recalculer » efface tous les réglages gardés (BPM, grille, K, B1, B2, C, F) : chaque son est réanalysé à zéro, les sons restent. « Vider » retire tous les sons gardés dans l'appli (tes fichiers sur le téléphone ne sont pas touchés), tu pourras les remettre. Appuie deux fois pour confirmer.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="dbtn" id="lib-recalc">Recalculer tous les sons</button><button class="dbtn" id="lib-wipe">Vider la bibliothèque</button></div>
+        </div>
+        <div class="sgroup">
           <h3>Rapport de mix</h3>
           <p class="snote">Si un mix part décalé : copie ce rapport juste après et colle-le dans la conversation avec Claude. Il contient les mesures de l'analyse et du lancement (aucun son, aucun fichier).</p>
           <button class="dbtn" id="diag-copy">Copier le rapport</button>
@@ -1886,7 +1891,7 @@ function bindDeck(d){
     const files = [...e.target.files]; e.target.value = ''; $('qpick').hidden = true;
     if (!files.length) return;
     const at = addFiles(files);
-    d.queue.push(...lib.slice(at, at + files.length)); renderQueue(d); saveQueues();
+    d.queue.push(...addFiles.last); renderQueue(d); saveQueues();
     if (!d.buffer && !d.playing && !d.loading){ const t = d.queue.shift(); renderQueue(d); saveQueues(); loadItem(lib.indexOf(t), d.id); }
     else toast(`${files.length} son${files.length > 1 ? 's' : ''} ajouté${files.length > 1 ? 's' : ''} à la file de la platine ${d.id}.`, 2600);
     if (auto && endOfList){ const cur = Object.values(decks).find(x => x.playing); if (cur){ endOfList = false; queueNext(cur, other(cur)); } }
@@ -2811,13 +2816,22 @@ document.querySelectorAll('#lenseg .dbtn').forEach(b => b.addEventListener('clic
 /* ---------- Playlist, réglages ---------- */
 const lib = [];
 const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Pas de doublons : un son déjà dans la bibliothèque (même nom, même taille) est repris tel quel au lieu d'être recopié
 function addFiles(files, after){
-  const items = files.map(f => ({id: newId(), name: f.name.replace(/\.[^.]+$/, ''), file: f, buffer: null, bpm: 0}));
+  const out = [], items = [];
+  for (const f of files){
+    const nm = f.name.replace(/\.[^.]+$/, '');
+    const ex = lib.find(t => t.id && t.name === nm && t.file && t.file.size === f.size);
+    if (ex) out.push(ex);
+    else { const it = {id: newId(), name: nm, file: f, buffer: null, bpm: 0}; items.push(it); out.push(it); }
+  }
+  if (out.length > items.length) toast(`${out.length - items.length} son${out.length - items.length > 1 ? 's' : ''} déjà dans la bibliothèque : pas de doublon, je reprends celui qui y est.`, 3000);
   const at = after && lib.indexOf(after) >= 0 ? lib.indexOf(after) + 1 : lib.length;
   lib.splice(at, 0, ...items);
   items.forEach(saveTrack); saveOrder();
+  addFiles.last = out;
   if (auto && endOfList){ const cur = Object.values(decks).find(d => d.playing); if (cur) queueNext(cur, other(cur)); }
-  return at;
+  return lib.indexOf(out[0]);
 }
 function renderLib(){
   const cur = Object.values(decks).find(d => d.playing);
@@ -3409,6 +3423,24 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+// Bibliothèque : remise à zéro (double appui pour confirmer, l'appli redémarre ensuite)
+function twoTap(btn, label, run){
+  let armed = 0;
+  btn.addEventListener('click', async () => {
+    if (Date.now() - armed > 4000){ armed = Date.now(); btn.textContent = 'Appuie encore pour confirmer'; setTimeout(() => { if (Date.now() - armed >= 4000) btn.textContent = label; }, 4100); return; }
+    btn.disabled = true; btn.textContent = 'En cours…';
+    try { await run(); } catch(e){}
+    location.reload();
+  });
+}
+twoTap($('lib-recalc'), 'Recalculer tous les sons', async () => {
+  const recs = await idb('tracks', 'readonly', st => st.getAll()) || [];
+  for (const r of recs){ r.markers = null; await idb('tracks', 'readwrite', st => st.put(r)); }
+});
+twoTap($('lib-wipe'), 'Vider la bibliothèque', async () => {
+  await idb('tracks', 'readwrite', st => st.clear());
+  await idb('samples', 'readwrite', st => st.delete('__order')); await idb('samples', 'readwrite', st => st.delete('__queues'));
+});
 function setLite(on){
   LITE = !!on; document.body.classList.toggle('lite', LITE);
   const b = $('lite'); b.setAttribute('aria-pressed', LITE); b.textContent = LITE ? 'Mode léger activé — désactiver' : 'Activer le mode léger';
@@ -3440,7 +3472,18 @@ applySkin(savedSkin);
     const recs = await idb('tracks', 'readonly', st => st.getAll()) || [];
     const order = await idb('samples', 'readonly', st => st.get('__order')) || [];
     recs.sort((a, b) => (order.indexOf(a.id) + 1 || 1e9) - (order.indexOf(b.id) + 1 || 1e9));
-    saved = recs.map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null}));
+    // Doublons déjà en mémoire (même nom + même taille) : on n'en garde qu'un (celui qui a des réglages, sinon le premier de la liste)
+    const keep = new Map(), alias = {};
+    for (const r of recs){
+      const k = r.name + '|' + (r.blob ? r.blob.size : 0), cur = keep.get(k);
+      if (!cur){ keep.set(k, r); continue; }
+      const better = (r.markers && !cur.markers) ? r : cur, drop = better === r ? cur : r;
+      keep.set(k, better); alias[drop.id] = better.id; idb('tracks', 'readwrite', st => st.delete(drop.id)).catch(() => {});
+    }
+    for (const a in alias){ let b = alias[a]; while (alias[b]) b = alias[b]; alias[a] = b; }
+    const kept = new Set([...keep.values()].map(r => r.id));
+    saved = recs.filter(r => kept.has(r.id)).map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null}));
+    saved.alias = alias;
   } catch(e){}
   const specs = [
     {name: 'Démo · Nuit Chaude', bpm: 122, style: 1, notes: [55, 55, 65.41, 49]},
@@ -3459,7 +3502,7 @@ applySkin(savedSkin);
     lib.unshift(...saved);
     try {
       const qs = await idb('samples', 'readonly', st => st.get('__queues'));
-      if (qs) for (const id of ['A', 'B']){ decks[id].queue = (qs[id] || []).map(x => saved.find(t => t.id === x)).filter(Boolean); renderQueue(decks[id]); }
+      if (qs) for (const id of ['A', 'B']){ decks[id].queue = (qs[id] || []).map(x => saved.find(t => t.id === ((saved.alias || {})[x] || x))).filter(Boolean); renderQueue(decks[id]); }
     } catch(e){}
     if (saved.length){ loadItem(0, 'A'); if (lib[1]) loadItem(1, 'B'); }
     else { decks.A.load(lib[0]); decks.B.load(lib[1]); }

@@ -2067,6 +2067,20 @@ function cutMarkOf(t){
   const st = t.struct; if (!st || st.lastBass == null || !t.bpm) return null;
   return autoCutTime(st.lastBass, 60 / t.bpm, st.outro, t);
 }
+function beatLvl(t, tm, beat){
+  const pk = t.peaks; if (!pk) return 1;
+  if (!t._lvN){ const md = a => { const v = Array.from(a).filter(x => x > 0).sort((x, y) => x - y); return v[Math.floor(v.length * 0.6)] || 1e-6; }; t._lvN = [md(pk.lo), md(pk.rms)]; }
+  const a = Math.floor((tm + 0.1 * beat) * RES), b = Math.floor((tm + 0.9 * beat) * RES), n = pk.lo.length; let acc = 0, c = 0;
+  for (let i = Math.max(0, a); i < Math.min(n, b); i++){ acc += pk.lo[i] / t._lvN[0] + pk.rms[i] / t._lvN[1]; c++; }
+  return c ? acc / c : 0;
+}
+// Petite coupure de fin des 32 premiers temps (roulement de basse, voix…) : à partir de quel temps (28 à 31) ça creuse
+function fillStart(t, t0, beat){
+  const ref = []; for (let q = 16; q < 28; q++) ref.push(beatLvl(t, t0 + q * beat, beat)); ref.sort((x, y) => x - y);
+  const r = ref[Math.floor(ref.length / 2)] || 0; if (r <= 0) return null;
+  let qs = null; for (let q = 31; q >= 28; q--){ if (beatLvl(t, t0 + q * beat, beat) < 0.65 * r) qs = q; else break; }
+  return qs;
+}
 function barEnergy(t){
   if (t.barE) return t.barE;
   const beat = 60 / t.bpm, nb = Math.floor((t.buffer.duration - t.firstBeat) / (4 * beat)), lo = t.peaks.lo, e = [];
@@ -2173,8 +2187,14 @@ function makePlan(o, n){
       if (ok){ cutBar = k; break; }
     } }
   const stopBars = cutBar != null ? cutBar : cutBars + tailBars;
+  // Trick DJ : à la petite coupure de fin des 32 premiers temps ensemble, on laisse A seul (voir startTransition)
+  let trick = null;
+  if (synced && useB2 && cutBars * 4 >= 36 && (cutBar == null || cutBar >= 9)){
+    const qB = fillStart(n.item, sn.drop, nb), qA = fillStart(o.item, P, ob), q = qB ?? qA;
+    if (q != null) trick = {q, from: qB != null ? n.id : o.id};
+  }
   return {o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
-          totalBeats: I + stopBars * 4 + 8, style: STYLES[mixCount % STYLES.length], scheduled: false};
+          totalBeats: I + stopBars * 4 + 8, trick, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
 
@@ -2304,6 +2324,16 @@ function startTransition(dt){
       plan.sortie = !plan.synced ? `Tempos trop éloignés : ${n.id} lancé sur son K1 à la coupure de ${o.id}, ${o.id} éteint en 4 temps` : tailB === 0 ? `C = F : ${o.id} éteint en douceur sur 4 temps` : `C→F : ${tailB} temps, ${steps} palier(s) de 16 temps (CFX ${fStart}→${fEnd}, médiums 0→-9 dB, aigus -4→-10 dB), extinction douce à F`;
     }
   }
+  // Trick DJ sur la petite coupure de fin des 32 premiers temps :
+  // B coupé au fader, A seul (basses remises, CFX à zéro, petit phaser pour habiller),
+  // puis pile sur le 1er temps après la coupure : B revient, basses de A recoupées, CFX et effet comme avant.
+  if (plan.trick){
+    const tq = tDrop + plan.trick.q * beat, t32 = tDrop + 32 * beat, fHold = Math.round(cfx * (cfx > 0 ? 45 : 40));
+    schedule(n, 'vol', 0, tq, 0.012); schedule(n, 'vol', 100, t32, 0.006);
+    schedule(o, 'lo', 0, tq, 0.012); schedule(o, 'filt', 0, tq, 0.02); schedule(o, 'fx', {name: 'phaser', amt: 0.55}, tq, 0.04);
+    schedule(o, 'lo', -26, t32, 0.004); schedule(o, 'filt', fHold, t32, 0.02); schedule(o, 'fx', {name: 'phaser', amt: 0}, t32, 0.03);
+    plan.trickTxt = `trick fin des 32 : ${o.id} seul ${32 - plan.trick.q} temps (coupure vue sur ${plan.trick.from})`;
+  }
   plan.events.sort((a, b) => a.t - b.t);
   plan.scheduled = true;
 }
@@ -2323,7 +2353,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
     basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
-    grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, entree: p.entree || '', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
+    grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
   if (DIAG.length > 6) DIAG.shift();
 }
 function finishTransition(){

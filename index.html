@@ -272,7 +272,10 @@ button{cursor:pointer}
 .edsave{border-color:var(--go)!important;color:var(--go)!important}
 .edplay.on{background:#3dffb0!important;color:#031216!important}
 .edtog[aria-pressed="true"]{border-color:#ffb13d!important;color:#ffb13d!important}
-.qplist li{grid-template-columns:40px 1fr 100px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.qplist .qe{border:1px solid var(--mute);background:none;color:var(--fg,#e9fbfc);border-radius:8px;height:34px;font-size:15px;padding:0 8px;white-space:nowrap}
+.qplist .ok{color:var(--go,#3dffb0);font-weight:700}
+.qlist .qok{color:var(--go,#3dffb0);margin-left:4px}
+.qplist li{grid-template-columns:40px 1fr 100px 96px;cursor:pointer;user-select:none;-webkit-user-select:none}
 .qplist .ck{width:30px;height:30px;border-radius:6px;border:2px solid var(--mute);display:grid;place-items:center;font-family:var(--font-lcd);font-size:15px;font-weight:700;color:#031216}
 .qplist li[aria-checked="true"] .ck{background:var(--qc,#20e6e8);border-color:var(--qc,#20e6e8);box-shadow:0 0 10px var(--qc,#20e6e8)}
 .qplist li[aria-checked="true"] .n{color:var(--qc,#20e6e8)}
@@ -892,6 +895,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         <h2 id="qp-title">À suivre</h2>
         <label class="dbtn" id="qp-imp">Du téléphone</label>
         <button class="dbtn" id="qp-all">Tout</button>
+        <button class="dbtn" id="qp-check" title="Ouvre l'éditeur sur chaque son à vérifier, l'un après l'autre">Vérifier</button>
         <button class="dbtn qp-ok" id="qp-ok" disabled>Ajouter</button>
         <button class="dbtn" data-close>Fermer</button>
       </div>
@@ -2512,12 +2516,16 @@ const ED_COL = {kick: '#20e6e8', bass: '#3dffb0', bass2: '#e5ff3d', out: '#ff3d6
 const ED_LBL = {kick: 'K', bass: 'B1', bass2: 'B2', out: 'F', cut: 'C'};
 function openEditor(d){
   const t = d.item; if (!t || !t.bpm || !t.buffer){ toast('Charge d\'abord un morceau sur cette platine.'); return; }
+  ED.list = null; openEditorItem(t, d, d.pos() > 0.5 ? d.pos() : null);
+}
+function openEditorItem(t, d, cur){
   const st = structureOf(t);
   ED.d = d; ED.t = t; ED.bpm = t.bpm; ED.fb = t.firstBeat;
   ED.m = {kick: t.firstBeat, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: t.markers && t.markers.cut != null ? t.markers.cut : null};
   ED.reset = false; ED.touched = new Set(); $('ed-free').setAttribute('aria-pressed', 'false');   // à l'ouverture : curseur sur les repères de la grille
-  ED.cur = d.pos() > 0.5 ? d.pos() : t.firstBeat; ED.span = 4 * 4 * 60 / t.bpm; ED.view = Math.max(0, ED.cur - ED.span / 3);
+  ED.cur = cur ?? t.firstBeat; ED.span = 4 * 4 * 60 / t.bpm; ED.view = Math.max(0, ED.cur - ED.span / 3);
   $('ed-title').textContent = `Éditeur · ${t.name}`;
+  $('ed-save').textContent = ED.list && ED.list.length ? `Enregistrer · suivant (${ED.list.length})` : 'Enregistrer';
   $('editor').hidden = false; requestAnimationFrame(edDraw);
 }
 const edT = () => 60 / ED.bpm;
@@ -2566,6 +2574,14 @@ function edDraw(){
   const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
   $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (sortie des 2 × 32 temps après B2, ou coupure F)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
 }
+// Vérifier un son AVANT de le mixer : il est analysé (sans platine) puis ouvert dans l'éditeur
+async function checkItem(t, rest){
+  if (!t) return;
+  if (!t.bpm || !t.buffer) toast(`Analyse de « ${t.name} »…`, 1500);
+  try { await prepItem(t); } catch(e){ toast(`« ${t.name} » n'a pas pu être lu.`); if (rest && rest.length) checkItem(rest.shift(), rest); return; }
+  ED.list = rest || null; openEditorItem(t, Object.values(decks).find(x => x.item === t) || null, null);
+}
+function isChecked(t){ return !!(t && t.markers && t.markers.ok); }
 function edStop(){ if (ED.src){ try { ED.src.stop(); } catch(e){} ED.src = null; } cancelAnimationFrame(ED.raf); $('ed-play').classList.remove('on'); $('ed-play').textContent = '▶ Écouter'; edDraw(); }
 function edPlay(){
   if (ED.src){ edStop(); return; }
@@ -2630,7 +2646,7 @@ $('ed-measure').addEventListener('click', () => {
   ED.bpm = Math.round(bpm * 100) / 100; ED.cur = x; edDraw();
   toast(`BPM mesuré sur ${nb} temps : ${ED.bpm.toFixed(2)}. Vérifie avec Écouter + Clic grille, puis Enregistrer.`, 4200);
 });
-$('ed-close').addEventListener('click', () => { edStop(); $('editor').hidden = true; });
+$('ed-close').addEventListener('click', () => { edStop(); $('editor').hidden = true; ED.list = null; if (!$('qpick').hidden) renderQPick(); });
 $('ed-auto').addEventListener('click', () => {
   const t = ED.t; ED.reset = true; ED.touched = new Set(); ED.bpm = t.autoBpm || t.bpm; ED.fb = t.autoFb ?? t.firstBeat;
   const keep = {bpm: t.bpm, fb: t.firstBeat, m: t.markers, st: t.struct, mg: t.manualGrid};
@@ -2649,12 +2665,15 @@ $('ed-save').addEventListener('click', () => {
   if (gridMan){ nm.bpm = ED.bpm; nm.grid = ED.fb; nm.kick = ED.fb; }
   for (const k of ['bass', 'bass2', 'out']) if ((ED.touched.has(k) || old[k] != null) && ED.m[k] != null) nm[k] = ED.m[k];
   if (ED.m.cut != null) nm.cut = ED.m.cut;
+  nm.ok = true;   // son vérifié à la main
   t.markers = nm; if (!gridMan){ t.manualGrid = false; }
   t.struct = null; t.barE = null; t.barR = null; structureOf(t);
   for (const x of Object.values(decks)) if (x.item === t){ x.bpm = t.bpm; x.firstBeat = t.firstBeat; x.overDirty = true; }
   if (t.id) saveTrack(t);
   if (plan && !plan.scheduled){ plan = null; replanIfNeeded(); }
   $('editor').hidden = true;
+  Object.values(decks).forEach(renderQueue); if (!$('qpick').hidden) renderQPick();
+  if (ED.list && ED.list.length){ toast(`« ${t.name} » vérifié ✓ — son suivant.`, 1800); checkItem(ED.list.shift(), ED.list); return; }
   toast(`Réglages enregistrés pour « ${t.name} » : ${t.bpm.toFixed(2)} BPM, grille et marqueurs gardés pour la prochaine fois.`, 4200);
 });
 addEventListener('resize', () => { if (!$('editor').hidden) edDraw(); });
@@ -2787,7 +2806,7 @@ function onTrackEnd(d){
 function renderQueue(d){
   const ul = $(`${d.id}-qlist`); if (!ul) return;
   d.queue = d.queue.filter(t => lib.includes(t));
-  ul.innerHTML = d.queue.length ? d.queue.map((t, i) => `<li><span class="qn">${i + 1}</span><span class="qt" data-qd="${d.id}" data-qi="${i}" title="Charger maintenant">${esc(t.name)}</span><button data-qx="${d.id}" data-qi="${i}" aria-label="Retirer de la file">×</button></li>`).join('')
+  ul.innerHTML = d.queue.length ? d.queue.map((t, i) => `<li><span class="qn">${i + 1}</span><span class="qt" data-qd="${d.id}" data-qi="${i}" title="Charger maintenant">${esc(t.name)}${isChecked(t) ? '<span class="qok">✓</span>' : ''}</span><button data-qx="${d.id}" data-qi="${i}" aria-label="Retirer de la file">×</button></li>`).join('')
     : `<li class="qempty">Ajoute les prochains sons : ils se chargeront ici, dans l'ordre.</li>`;
 }
 function saveQueues(){ idb('samples', 'readwrite', st => st.put({A: decks.A.queue.map(t => t.id).filter(Boolean), B: decks.B.queue.map(t => t.id).filter(Boolean)}, '__queues')).catch(() => {}); }
@@ -2924,17 +2943,23 @@ function renderQPick(){
   const d = qpDeck;
   $('qp-list').innerHTML = lib.map((t, i) => { const k = qpSel.indexOf(t);
     return `<li data-qp="${i}" role="checkbox" aria-checked="${k >= 0}" class="${d.queue.includes(t) || d.item === t ? 'inq' : ''}">
-      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${esc(t.name)}</span><span class="m">${t.bpm ? t.bpm.toFixed(1) + ' BPM' : '— BPM'}</span></li>`; }).join('')
-    + '<li class="dnote">Touche les sons dans l\'ordre où tu veux les jouer (le numéro = l\'ordre), puis « Ajouter ». « Du téléphone » importe de nouveaux fichiers : sur le téléphone, appuie longuement sur un fichier pour en cocher plusieurs.</li>';
+      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${esc(t.name)}${isChecked(t) ? ' <span class="ok">✓</span>' : ''}</span><span class="m">${t.bpm ? t.bpm.toFixed(1) + ' BPM' : '— BPM'}</span><button class="qe" data-qe="${i}" aria-label="Vérifier ce son dans l'éditeur">✎ Vérifier</button></li>`; }).join('')
+    + '<li class="dnote">Touche les sons dans l\'ordre où tu veux les jouer (le numéro = l\'ordre), puis « Ajouter ». « Du téléphone » importe de nouveaux fichiers : sur le téléphone, appuie longuement sur un fichier pour en cocher plusieurs.<br>✎ Vérifier : ouvre le son dans l\'éditeur pour contrôler K, B1, B2, C, F avant le mix. « Vérifier » en haut : passe un à un les sons cochés (ou, sans coche, ceux de la file pas encore vérifiés). ✓ = son vérifié.</li>';
   const n = qpSel.length, ok = $('qp-ok');
   ok.disabled = !n; ok.textContent = n ? `Ajouter (${n})` : 'Ajouter';
   $('qp-all').textContent = n === lib.length ? 'Aucun' : 'Tout';
 }
 $('qp-list').addEventListener('click', e => {
+  const qe = e.target.closest('[data-qe]'); if (qe){ e.stopPropagation(); checkItem(lib[+qe.dataset.qe], []); return; }
   const li = e.target.closest('li[data-qp]'); if (!li) return;
   const t = lib[+li.dataset.qp], k = qpSel.indexOf(t);
   if (k >= 0) qpSel.splice(k, 1); else qpSel.push(t);
   renderQPick();
+});
+$('qp-check').addEventListener('click', () => {
+  const d = qpDeck; let list = qpSel.length ? qpSel.slice() : d.queue.filter(t => !isChecked(t));
+  if (!list.length){ toast(qpSel.length ? '' : 'Tous les sons de la file sont déjà vérifiés ✓ (coche des sons pour les revoir).', 3000); return; }
+  checkItem(list.shift(), list);
 });
 $('qp-all').addEventListener('click', () => { qpSel = qpSel.length === lib.length ? [] : lib.slice(); renderQPick(); });
 $('qp-ok').addEventListener('click', () => {
@@ -2964,6 +2989,18 @@ async function loadItem(i, deckId){
   if (plan && plan.n === d && !plan.scheduled) plan = null;
   d.loading = t.name;
   try {
+    await prepItem(t);
+    d.load(t);
+    autoSyncIdle(d);
+    d.ctl.lo.set(0); d.ctl.filt.set(0);
+    replanIfNeeded();
+  } catch(err){
+    toast('Ce fichier n\'a pas pu être lu. Essaie un MP3, WAV ou M4A.');
+  }
+  d.loading = null;
+}
+// Décode et analyse un son de la bibliothèque (sans le charger sur une platine)
+async function prepItem(t){
     if (!t.buffer) t.buffer = await decode(await t.file.arrayBuffer());
     if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
       const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
@@ -2983,14 +3020,8 @@ async function loadItem(i, deckId){
       }
       if (t.markers && t.markers.bpm){ t.bpm = t.markers.bpm; t.firstBeat = t.start = t.markers.grid ?? t.firstBeat; t.manualGrid = true; }   // grille réglée à la main dans l'éditeur
       else if (t.markers && t.markers.kick != null){ const bl = 60 / t.bpm; t.firstBeat = t.start = t.firstBeat + Math.round((t.markers.kick - t.firstBeat) / bl) * bl; } }
-    d.load(t);
-    autoSyncIdle(d);
-    d.ctl.lo.set(0); d.ctl.filt.set(0);
-    replanIfNeeded();
-  } catch(err){
-    toast('Ce fichier n\'a pas pu être lu. Essaie un MP3, WAV ou M4A.');
-  }
-  d.loading = null;
+    if (!t.peaks) t.peaks = computePeaks(t.buffer);
+    structureOf(t);
 }
 
 /* ---------- Dessin ---------- */

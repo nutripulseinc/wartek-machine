@@ -959,7 +959,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 98</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 99</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2425,7 +2425,10 @@ function startTransition(dt){
   plan.cfx = `CFX ${longMix ? 'long' : 'court'} · ${cfx > 0 ? 'aigus' : 'graves'}`;
   mixCount++;
   const c0 = Math.max(now + 0.05, tDrop - span * beat), cn = Math.round((tDrop - c0) / beat);
-  for (let i = 1; i <= cn; i++) schedule(o, 'filt', Math.round(cfx * (cfx > 0 ? 45 : 40) * Math.pow(i / cn, 1.4)), c0 + i * beat, longMix ? 0.08 : 0.04);
+  // 32 premiers temps de B1 sur B2 : CFX tout léger (on entend vraiment les deux sons ensemble), puis CFX normal jusqu'à C
+  const cfxLight = Math.round(cfx * (cfx > 0 ? 20 : 18)), cfxFull = Math.round(cfx * (cfx > 0 ? 45 : 40));
+  for (let i = 1; i <= cn; i++) schedule(o, 'filt', Math.round(cfxLight * Math.pow(i / cn, 1.4)), c0 + i * beat, longMix ? 0.08 : 0.04);
+  if (plan.synced && plan.cutBars * 4 > 33 && !(plan.trick || []).some(tk => tk.end === 32)) for (let i = 1; i <= 4; i++) schedule(o, 'filt', Math.round(cfxLight + (cfxFull - cfxLight) * i / 4), tDrop + (31 + i) * beat, 0.08);
   // Du swap (B2) jusqu'à C : A reste comme il est (basses coupées, CFX léger du swap), pas de changement.
   if (st === 'flanger'){
     for (let i = 0; i <= n8; i += 2) schedule(o, 'fx', {name: 'flanger', amt: 0.1 + 0.55 * i / Math.max(1, n8)}, pre8 + i * beat, 0.25);
@@ -2475,7 +2478,7 @@ function startTransition(dt){
   const FXT = [{name: 'phaser', amt: 0.55}, {name: 'flanger', amt: 0.5}, {name: 'echo', amt: 0.5, rate: 0.5, fb: 0.45}, {name: 'filter', amt: 0.6, rate: 1.5}];
   for (const tk of plan.trick || []){ tk.fx = pick(FXT); }
   for (const tk of plan.trick || []){
-    const tq = tDrop + tk.q * beat, t32 = tDrop + tk.end * beat, fHold = Math.round(cfx * (cfx > 0 ? 45 : 40));
+    const tq = tDrop + tk.q * beat, t32 = tDrop + tk.end * beat, fHold = tk.end >= 32 && plan.cutBars * 4 > 33 ? Math.round(cfx * (cfx > 0 ? 45 : 40)) : Math.round(cfx * (cfx > 0 ? 20 : 18));
     schedule(n, 'vol', 0, tq, 0.012); schedule(n, 'vol', 100, t32, 0.006);
     schedule(o, 'lo', 0, tq, 0.012); schedule(o, 'filt', 0, tq, 0.02); schedule(o, 'fx', tk.fx, tq, 0.04);
     schedule(o, 'lo', -26, t32, 0.004); schedule(o, 'filt', fHold, t32, 0.02); schedule(o, 'fx', {name: 'none'}, t32, 0.03);
@@ -2642,7 +2645,7 @@ function earCheck(plan, now){
   lag -= exp;   // on ne corrige que l'écart qui n'est pas « voulu » par le calage du drop
   // BPM validés au peigne des deux côtés + B1 / B2 calés au kick près : le calage est sûr, l'oreille écoute mais ne touche plus
   // (ses mesures hésitent entre plusieurs attaques sur les kicks hardstyle, et chaque correction s'entend)
-  if (bothSure && plan.snap && plan.snap.B2_sort_ms != null && plan.snap.B1_entre_ms != null){ lockInfo = {t: now, txt: `CALÉ AU KICK ✓ (oreille ${Math.round(lag * 1000)} ms)`}; return; }
+  if (plan.snap && plan.snap.B2_sort_ms != null && plan.snap.B1_entre_ms != null){ lockInfo = {t: now, txt: `CALÉ AU KICK ✓ (oreille ${Math.round(lag * 1000)} ms)`}; return; }
   const prev = plan.earLast; plan.earLast = lag;
   if (Math.abs(lag) < 0.006){ lockInfo = {t: now, txt: 'CALÉ À L\'OREILLE ✓'}; return; }
   // On ne corrige que si deux écoutes de suite donnent le même écart (à 3 ms près) : pas de coup de pitch sur une fausse mesure
@@ -3319,7 +3322,8 @@ async function prepItem(t){
     if (t.manualGrid && !t._gridChecked){ t._gridChecked = true;
       try { const L = gridLock(t, t.bpm, t.firstBeat);
         const dv = L ? L.driftBefore.filter(v => v != null) : [], drng = dv.length > 2 ? Math.max(...dv) - Math.min(...dv) : 0;
-        if (L && drng > 30 && !(L.errBefore > 8 && L.errAfter < L.errBefore / 2)){
+        const lineDrift = L ? Math.abs(L.bpm - t.bpm) / t.bpm * t.buffer.duration * 1000 : 0;   // glissement réel (droite sur tout le morceau), pas une tranche isolée
+        if (L && drng > 30 && lineDrift > 25 && !(L.errBefore > 8 && L.errAfter < L.errBefore / 2)){
           t.bpmWarn = `la grille glisse de ${Math.round(drng)} ms sur le morceau (${dv.join(' / ')} ms) : BPM ${t.bpm.toFixed(3)} sûrement un peu faux`;
           toast(`⚠ « ${t.name} » : le BPM ${t.bpm.toFixed(3)} glisse de ~${Math.round(drng)} ms entre le début et la fin. Dans l'éditeur : K sur un kick du début, curseur sur un kick de la fin, « Mesurer K → curseur ».`, 7000);
         }

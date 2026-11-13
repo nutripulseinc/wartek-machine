@@ -917,7 +917,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
           <div class="edgrp"><span class="edlbl">BPM</span><button data-bpm="-0.1">−0,1</button><button data-bpm="-0.01">−0,01</button><b id="ed-bpm">—</b><button data-bpm="0.01">+0,01</button><button data-bpm="0.1">+0,1</button><button data-bpmx="0.5">÷2</button><button data-bpmx="2">×2</button></div>
           <div class="edgrp"><span class="edlbl">Grille</span><button data-gs="-0.005">◀◀ 5 ms</button><button data-gs="-0.001">◀ 1</button><button data-gs="0.001">1 ▶</button><button data-gs="0.005">5 ms ▶▶</button></div>
           <div class="edgrp"><span class="edlbl">Zoom</span><button id="ed-zout">−</button><button id="ed-zin">+</button><button id="ed-play" class="edplay">▶ Écouter</button><button id="ed-click" class="edtog" aria-pressed="true">Clic grille</button></div>
-          <div class="edgrp"><span class="edlbl">BPM précis</span><button id="ed-lock" title="Cale la grille (BPM et départ) au ms près sur les vrais kicks du morceau entier">🔒 Caler sur les kicks</button><button id="ed-measure" title="Place le curseur sur un kick loin du K (fin du morceau) puis touche ici">Mesurer K → curseur</button></div>
+          <div class="edgrp"><span class="edlbl">BPM précis</span><button id="ed-tap" title="Tape en rythme sur les kicks pendant l'écoute : l'appli trouve ensuite le tempo exact au peigne">👆 TAP</button><button id="ed-lock" title="Cale la grille (BPM et départ) au ms près sur les vrais kicks du morceau entier">🔒 Caler sur les kicks</button><button id="ed-measure" title="Place le curseur sur un kick loin du K (fin du morceau) puis touche ici">Mesurer K → curseur</button></div>
         </div>
         <div class="edbar">
           <div class="edgrp"><span class="edlbl">Poser au curseur</span><button data-em="kick" class="mk-k">K</button><button data-em="bass" class="mk-b1">B1</button><button data-em="bass2" class="mk-b2">B2</button><button data-em="out" class="mk-f">F</button><button data-em="cut" class="mk-c">C</button><button data-em="cutx" title="Enlever C">C ✕</button><button id="ed-free" class="edtog" aria-pressed="false" title="Libre : C exactement au curseur, B1/B2/F sur le temps le plus proche (au lieu de la mesure), K sans aimant">Mode libre</button></div>
@@ -959,7 +959,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 96</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 97</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2685,11 +2685,11 @@ function edDraw(){
     if (cAuto != null){ const x = cAuto / dur * W; g.globalAlpha = 0.6; g.fillStyle = ED_COL.cut; for (let y = 0; y < H; y += 10) g.fillRect(x - 1.5, y, 3, 6); g.font = 'bold 22px monospace'; g.fillText('C auto', x + 4, 22); g.globalAlpha = 1; }
     // Courbe « kicks / grille » : un point par kick = de combien il tombe avant (haut) ou après (bas) la grille.
     // Ligne plate au milieu = BPM juste. Pente = BPM un peu faux. Marches = coupures de montage dans le son.
-    { const ks = ED.t.fitInfo && ED.t.fitInfo.kicks, T = edT(), lim = 0.06;
-      if (ks && ks.length){ g.globalAlpha = 0.5; g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(0, H * 0.62, W, H * 0.38); g.globalAlpha = 1;
+    { const key = ED.bpm + '|' + ED.fb; if (ED.curveFor !== key){ ED.curveFor = key; try { ED.curve = localPhases(ED.t, ED.bpm, ED.fb, 4); } catch(e){ ED.curve = []; } }
+      const lim = 0.06; if (ED.curve && ED.curve.length){ g.globalAlpha = 0.5; g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(0, H * 0.62, W, H * 0.38); g.globalAlpha = 1;
         g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(0, H * 0.81, W, 1);
-        for (const x of ks){ let r = (x - ED.fb) / T; r = (r - Math.round(r)) * T; const y = H * 0.81 + clamp(r / lim, -1, 1) * H * 0.18;
-          g.fillStyle = Math.abs(r) < 0.008 ? '#3dffb0' : Math.abs(r) < 0.02 ? '#ffb13d' : '#ff4d6d'; g.fillRect(x / dur * W - 1.5, y - 1.5, 3, 3); } } }
+        for (const q of ED.curve){ const r = q.off, y = H * 0.81 + clamp(r / lim, -1, 1) * H * 0.18;
+          g.fillStyle = Math.abs(r) < 0.008 ? '#3dffb0' : Math.abs(r) < 0.02 ? '#ffb13d' : '#ff4d6d'; g.fillRect(q.t / dur * W - 2.5, y - 2.5, 5, 5); } } }
     g.fillStyle = '#fff'; g.fillRect(ED.cur / dur * W - 1, 0, 2, H); }
   // zoom, depuis le son brut
   { const cv = $('ed-zoom'), g = edFit(cv), W = cv.width, H = cv.height, sr = t.buffer.sampleRate;
@@ -2843,6 +2843,26 @@ document.querySelectorAll('[data-mn],[data-mb]').forEach(b => b.addEventListener
 $('ed-zin').addEventListener('click', () => { if (ED.span > 0.05){ const c = ED.cur; ED.span /= 2; ED.view = c - ED.span / 3; edDraw(); } });
 $('ed-zout').addEventListener('click', () => { if (ED.span < 200){ const c = ED.cur; ED.span *= 2; ED.view = Math.max(-ED.span / 2, c - ED.span / 3); edDraw(); } });
 $('ed-play').addEventListener('click', edPlay);
+// TAP + peigne : tu donnes la zone de tempo à l'oreille (8 à 16 taps), l'appli trouve le tempo exact sur tout le morceau
+{ const tap = {ts: [], timer: 0};
+  const apply = () => {
+    const ts = tap.ts; tap.ts = []; $('ed-tap').textContent = '👆 TAP'; if (ts.length < 4){ toast('Tape au moins 4 fois en rythme sur les kicks (8 à 16, c\'est mieux).', 3000); return; }
+    const iv = []; for (let i = 1; i < ts.length; i++) iv.push(ts[i] - ts[i - 1]); iv.sort((a, b) => a - b);
+    const med = iv[Math.floor(iv.length / 2)], good = iv.filter(v => Math.abs(v - med) < 0.25 * med), tb = 60 * good.length / good.reduce((a, b) => a + b, 0);
+    if (!(tb > 60 && tb < 260)){ toast('Tap pas régulier : recommence en tapant sur chaque kick.', 3000); return; }
+    let cb; try { cb = combTempo(ED.t, tb); } catch(e){}
+    if (!cb){ ED.bpm = Math.round(tb * 100) / 100; edDraw(); toast(`Tap : ${tb.toFixed(1)} BPM (pas de peigne possible sur ce son, affine à l'oreille).`, 4000); return; }
+    const Tn = 60 / cb.bpm, nfb = cb.phase + Math.round((ED.fb - cb.phase) / Tn) * Tn, dk = ED.m.kick != null && Math.abs(ED.m.kick - ED.fb) < 1e-6;
+    ED.bpm = Math.round(cb.bpm * 1000) / 1000; ED.fb = nfb; if (dk) ED.m.kick = nfb; ED.touched.add('grid'); edDraw();
+    toast(`👆 Tap ${tb.toFixed(1)} → 🎯 tempo exact ${ED.bpm.toFixed(3)} BPM (netteté ${cb.sharp.toFixed(1)}${cb.sharp < 1.15 ? ' : peu net, vérifie à l\'oreille' : ''}). Grille calée, écoute avec Clic grille puis Enregistrer.`, 6000);
+  };
+  $('ed-tap').addEventListener('pointerdown', e => { e.preventDefault();
+    const now = performance.now() / 1000; if (tap.ts.length && now - tap.ts[tap.ts.length - 1] > 2) tap.ts = [];
+    tap.ts.push(now); clearTimeout(tap.timer);
+    if (tap.ts.length >= 2){ const n = tap.ts.length, b = 60 * (n - 1) / (tap.ts[n - 1] - tap.ts[0]); $('ed-tap').textContent = `👆 ${b.toFixed(1)} (${n})`; } else $('ed-tap').textContent = '👆 … (1)';
+    if (tap.ts.length >= 16) apply(); else tap.timer = setTimeout(apply, 1600);   // on s'arrête de taper → calcul
+  });
+}
 $('ed-lock').addEventListener('click', () => {
   const L = gridLock(ED.t, ED.bpm, ED.fb);
   if (!L || L.errAfter > 15){ toast('Pas assez de kicks nets pour caler la grille sur ce son (ou BPM trop loin : règle-le d\'abord à peu près). Utilise « Mesurer K → curseur ».', 4000); return; }
@@ -3490,18 +3510,6 @@ function kickOnsets(buf){
   for (let k = n - 1; k >= 2; k--) on[k] = 0.5 * on[k] + 0.3 * on[k - 1] + 0.2 * on[k - 2];
   return {env: on, rate: sr / hop};   // (pas exactement 1000 si la fréquence ne tombe pas juste : 44,1 kHz → 1002,3)
 }
-// Verrou de grille sur les kicks (comme le « grid lock » des logiciels pro) :
-// pour chaque temps de la grille, on cherche l'attaque de kick la plus forte tout près (± 20 % du temps) au ms près,
-// on ignore les temps sans kick et les contretemps (reverse bass, basses roulantes), puis droite robuste → BPM et départ exacts.
-// Coupures de montage (souvent dans les « previews ») : la position des kicks fait un SAUT d'un coup par rapport à la grille
-function spliceScan(t, bpm, fb){
-  const ks = t.fitInfo && t.fitInfo.kicks; if (!ks || ks.length < 64) return [];
-  const T = 60 / bpm, W = 16 * T, D = t.buffer.duration, med = r => { const v = [...r].sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
-  const seg = []; for (let a = 0; a < D; a += W){ const r = Array.from(ks).filter(x => x >= a && x < a + W).map(x => { let q = (x - fb) / T; return (q - Math.round(q)) * T; }); if (r.length >= 8) seg.push({a, m: med(r)}); }
-  const out = []; for (let i = 1; i < seg.length - 1; i++){ const j1 = seg[i].m - seg[i - 1].m, j2 = seg[i + 1].m - seg[i].m;
-    if (Math.abs(j1) > 0.015 && Math.abs(j2) < 0.008 && seg[i].a - seg[i - 1].a < W * 1.5) out.push({t: seg[i].a, ms: Math.round(j1 * 1000)}); }
-  return out;
-}
 // ===== Tempo « au peigne » sur tout le morceau =====
 // On écoute les attaques à la milliseconde dans 2 bandes : les graves (corps du kick) et les aigus (le CLIC du kick).
 // Pour chaque BPM candidat, on pose une grille (toutes les positions de départ, au ms) et on additionne les attaques
@@ -3537,13 +3545,40 @@ function combTempo(t, b0){
   const nb = Math.max(...[-0.1, -0.05, 0.05, 0.1].map(d => combScore(C, best.bpm + d, 2).s));
   return {bpm: best.bpm, phase: best.phase, score: best.s, scoreCur: cur, sharp: best.s / Math.max(1e-6, nb)};
 }
+// Phase locale au peigne : pour chaque fenêtre de wb temps, de combien les attaques sont décalées par rapport à la grille
+function localPhases(t, bpm, fb, wb = 16){
+  const C = combEnv(t), T = 60 / bpm, W = wb * T, D = t.buffer.duration, e = C.e, R = C.rate, out = [];
+  for (let a = Math.max(0, fb); a + W <= D; a += W){
+    const k0 = Math.ceil((a - fb) / T), k1 = Math.floor((a + W - fb) / T); let best = -1, bo = 0, tot = 0, cnt = 0;
+    for (let d = -Math.floor(0.3*T*R); d <= Math.floor(0.3*T*R); d++){ let s = 0; for (let k = k0; k < k1; k++){ const i = Math.round((fb + k*T)*R) + d; if (i >= 0 && i < C.n) s += e[i]; } tot += s; cnt++; if (s > best){ best = s; bo = d; } }
+    const mean = tot / Math.max(1, cnt); if (best > 1.6 * mean && best > 0.5) out.push({t: a + W/2, off: bo / R});
+  }
+  return out;
+}
+// Verrou de grille sur les kicks (comme le « grid lock » des logiciels pro) :
+// pour chaque temps de la grille, on cherche l'attaque de kick la plus forte tout près (± 20 % du temps) au ms près,
+// on ignore les temps sans kick et les contretemps (reverse bass, basses roulantes), puis droite robuste → BPM et départ exacts.
+// Coupures de montage (souvent dans les « previews ») : la position des kicks fait un SAUT d'un coup par rapport à la grille
+function spliceScan(t, bpm, fb){
+  // une vraie coupure = la grille saute d'un coup ET reste au nouvel endroit (3 tranches avant stables, 3 après stables)
+  // on mesure sur la grille recalée (sinon un BPM un peu faux fait « glisser » les kicks et ressemble à des sauts)
+  let L = null; try { L = gridLock(t, bpm, fb); } catch(e){} if (L){ bpm = L.bpm; fb = L.fb; }
+  const P = localPhases(t, bpm, fb, 8); if (P.length < 8) return [];
+  const md = a => { const v = [...a].sort((x, y) => x - y); return v[Math.floor(v.length / 2)]; }, out = [];
+  for (let i = 3; i + 3 <= P.length; i++){
+    const A = P.slice(i - 3, i).map(p => p.off), B = P.slice(i, i + 3).map(p => p.off), ma = md(A), mb = md(B);
+    if (Math.abs(mb - ma) > 0.015 && A.every(v => Math.abs(v - ma) < 0.008) && B.every(v => Math.abs(v - mb) < 0.008)
+        && (!out.length || P[i].t - out[out.length - 1].t > 20)) out.push({t: P[i].t, ms: Math.round((mb - ma) * 1000)});
+  }
+  return out;
+}
 function gridLock(t, bpm, fb){
   // Calage robuste, même sur les kicks hardstyle (clic + corps) : le morceau est découpé en tranches de 16 temps,
   // dans chaque tranche on prend l'écart MÉDIAN kicks / grille, puis une droite à travers ces tranches :
   // la pente = l'erreur de BPM, la hauteur = le décalage de la grille. Les coupures de montage sont écartées.
-  const ks0 = t.fitInfo && t.fitInfo.kicks; if (!ks0 || ks0.length < 40 || !t.buffer) return null;
-  const ks = Array.from(ks0), D = t.buffer.duration, med = r => { const v = [...r].sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
-  const segs = (T, f) => { const W = 16 * T, out = []; for (let a = 0; a < D; a += W){ const r = ks.filter(x => x >= a && x < a + W).map(x => { let q = (x - f) / T; return (q - Math.round(q)) * T; }).filter(v => Math.abs(v) < 0.25 * T); if (r.length >= 6) out.push([a + W / 2, med(r)]); } return out; };
+  if (!t.buffer) return null;
+  const D = t.buffer.duration, med = r => { const v = [...r].sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
+  const segs = (T, f) => localPhases(t, 60 / T, f).map(p => [p.t, p.off]);
   const T0 = 60 / bpm; let T = T0, f = fb;
   for (let it = 0; it < 4; it++){
     let S = segs(T, f); if (S.length < 4) return null;
@@ -3557,8 +3592,8 @@ function gridLock(t, bpm, fb){
   }
   if (!(Math.abs(T - T0) / T0 < 0.01)) return null;
   const err = (TT, ff) => { const S = segs(TT, ff); return S.length ? med(S.map(p => Math.abs(p[1]))) * 1000 : 99; };
-  const drift = [0.1, 0.3, 0.5, 0.7, 0.9].map(q => { const S = segs(T0, fb).filter(p => Math.abs(p[0] - D * q) < 10); return S.length ? Math.round(S[0][1] * 1000) : null; });
-  return {bpm: 60 / T, fb: f, errBefore: err(T0, fb), errAfter: err(T, f), n: ks.length, driftBefore: drift};
+  const drift = [0.1, 0.3, 0.5, 0.7, 0.9].map(q => { const S = segs(T0, fb).filter(p => Math.abs(p[0] - D * q) < 15); return S.length ? Math.round(med(S.map(p => p[1])) * 1000) : null; });
+  return {bpm: 60 / T, fb: f, errBefore: err(T0, fb), errAfter: err(T, f), n: segs(T, f).length, driftBefore: drift};
 }
 const onsetAt = (t, sec) => { const h = null; if (!h) return t.env ? envAt(t, sec) : 0; const x = sec * h.rate, i = Math.floor(x), f = x - i, e = h.env; return i >= 0 && i + 1 < e.length ? e[i] * (1 - f) + e[i + 1] * f : 0; };
 // Mesure du décalage par corrélation : renvoie le retard du second son (s) ou null si pas fiable

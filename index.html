@@ -959,7 +959,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 93</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 94</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -3485,23 +3485,27 @@ function spliceScan(t, bpm, fb){
   return out;
 }
 function gridLock(t, bpm, fb){
-  // Points = les attaques de kick mesurées à l'analyse (détecteur multibande, le plus fiable). Les contretemps sont écartés.
-  const ks = t.fitInfo && t.fitInfo.kicks ? Array.from(t.fitInfo.kicks) : null; if (!ks || ks.length < 40 || !t.buffer) return null;
-  const D = t.buffer.duration, T0 = 60 / bpm, fb0 = fb, med = r => { const v = [...r].sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
-  const pick = (T, f, upTo) => ks.filter(x => x < upTo).map(x => { const k = Math.round((x - f) / T); return [k, x, x - (f + k * T)]; }).filter(p => Math.abs(p[2]) < 0.2 * T);
-  const fit = Q => { const n = Q.length; let sx = 0, sy = 0, sxx = 0, sxy = 0; for (const [k, x] of Q){ sx += k; sy += x; sxx += k * k; sxy += k * x; } const Tn = (n * sxy - sx * sy) / (n * sxx - sx * sx); return [Tn, (sy - Tn * sx) / n]; };
-  let T = T0, f = fb, P = [];
-  for (const span of [0.2, 0.4, 0.7, 1]){
-    P = pick(T, f, D * span); if (P.length < 20) continue;
-    let [Tn, f0] = fit(P);
-    for (let it = 0; it < 3; it++){ const lim = Math.max(0.004, 3 * med(P.map(([k, x]) => Math.abs(x - (f0 + k * Tn))))); const Q = P.filter(([k, x]) => Math.abs(x - (f0 + k * Tn)) <= lim); if (Q.length < 20) break; P = Q; [Tn, f0] = fit(P); }
-    if (!(Math.abs(Tn - T0) / T0 < 0.01)) return null;
-    T = Tn; f = f0;
+  // Calage robuste, même sur les kicks hardstyle (clic + corps) : le morceau est découpé en tranches de 16 temps,
+  // dans chaque tranche on prend l'écart MÉDIAN kicks / grille, puis une droite à travers ces tranches :
+  // la pente = l'erreur de BPM, la hauteur = le décalage de la grille. Les coupures de montage sont écartées.
+  const ks0 = t.fitInfo && t.fitInfo.kicks; if (!ks0 || ks0.length < 40 || !t.buffer) return null;
+  const ks = Array.from(ks0), D = t.buffer.duration, med = r => { const v = [...r].sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
+  const segs = (T, f) => { const W = 16 * T, out = []; for (let a = 0; a < D; a += W){ const r = ks.filter(x => x >= a && x < a + W).map(x => { let q = (x - f) / T; return (q - Math.round(q)) * T; }).filter(v => Math.abs(v) < 0.25 * T); if (r.length >= 6) out.push([a + W / 2, med(r)]); } return out; };
+  const T0 = 60 / bpm; let T = T0, f = fb;
+  for (let it = 0; it < 4; it++){
+    let S = segs(T, f); if (S.length < 4) return null;
+    for (let k = 0; k < 2; k++){ // on écarte les tranches qui sortent de la droite (coupures, passages sans kick net)
+      const n = S.length, mx = S.reduce((a, p) => a + p[0], 0) / n, my = S.reduce((a, p) => a + p[1], 0) / n; let sxy = 0, sxx = 0; for (const [x, y] of S){ sxy += (x - mx) * (y - my); sxx += (x - mx) ** 2; }
+      const b = sxy / sxx, c = my - b * mx, res = S.map(([x, y]) => Math.abs(y - (c + b * x))), lim = Math.max(0.004, 3 * med(res)); const Q = S.filter((p, i) => res[i] <= lim); if (Q.length >= 4) S = Q; }
+    const n = S.length, mx = S.reduce((a, p) => a + p[0], 0) / n, my = S.reduce((a, p) => a + p[1], 0) / n; let sxy = 0, sxx = 0; for (const [x, y] of S){ sxy += (x - mx) * (y - my); sxx += (x - mx) ** 2; }
+    const b = sxy / sxx, c = my - b * mx;   // écart(t) ≈ c + b·t
+    f = f + c + b * f; T = T * (1 + b);
+    if (Math.abs(b) < 1e-6 && Math.abs(c) < 0.0005) break;
   }
-  if (P.length < 30) return null;
-  const errAfter = med(pick(T, f, D).map(p => Math.abs(p[2]))) * 1000, errBefore = med(pick(T0, fb0, D).map(p => Math.abs(p[2]))) * 1000;
-  const drift = [0.1, 0.3, 0.5, 0.7, 0.9].map(q => { const r = pick(T0, fb0, D).filter(p => Math.abs(p[1] - D * q) < 8).map(p => p[2] * 1000); return r.length ? Math.round(med(r)) : null; });
-  return {bpm: 60 / T, fb: f, errBefore, errAfter, n: P.length, driftBefore: drift};
+  if (!(Math.abs(T - T0) / T0 < 0.01)) return null;
+  const err = (TT, ff) => { const S = segs(TT, ff); return S.length ? med(S.map(p => Math.abs(p[1]))) * 1000 : 99; };
+  const drift = [0.1, 0.3, 0.5, 0.7, 0.9].map(q => { const S = segs(T0, fb).filter(p => Math.abs(p[0] - D * q) < 10); return S.length ? Math.round(S[0][1] * 1000) : null; });
+  return {bpm: 60 / T, fb: f, errBefore: err(T0, fb), errAfter: err(T, f), n: ks.length, driftBefore: drift};
 }
 const onsetAt = (t, sec) => { const h = null; if (!h) return t.env ? envAt(t, sec) : 0; const x = sec * h.rate, i = Math.floor(x), f = x - i, e = h.env; return i >= 0 && i + 1 < e.length ? e[i] * (1 - f) + e[i + 1] * f : 0; };
 // Mesure du décalage par corrélation : renvoie le retard du second son (s) ou null si pas fiable

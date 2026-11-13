@@ -959,7 +959,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 91</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 92</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2738,10 +2738,11 @@ function edPosNow(){ const L = ED.loopAB; if (L){ const len = L.b - L.a; return 
 // et un BIP aigu pile sur le repère → on entend tout de suite si le repère tombe sur la basse / le kick.
 function edLoopRender(L){
   const buf = ED.t.buffer, sr = buf.sampleRate, n = Math.max(1, Math.round((L.b - L.a) * sr)), ch = buf.numberOfChannels, out = ctx.createBuffer(ch, n, sr), s0 = Math.round(L.a * sr);
-  for (let c = 0; c < ch; c++){ const src = buf.getChannelData(c), dst = out.getChannelData(c); for (let i = 0; i < n; i++){ const j = s0 + i; dst[i] = j >= 0 && j < src.length ? src[j] : 0; } }
-  const blip = (tm, f, amp, dur) => { const i0 = Math.round((tm - L.a) * sr), m = Math.round(dur * sr); for (let c = 0; c < ch; c++){ const dst = out.getChannelData(c); for (let i = 0; i < m && i0 + i < n; i++){ if (i0 + i < 0) continue; dst[i0 + i] += amp * Math.sin(2 * Math.PI * f * i / sr) * Math.exp(-i / (m * 0.3)); } } };
-  if ($('ed-click').getAttribute('aria-pressed') === 'true'){ const T = edT(); for (let k = Math.ceil((L.a - ED.fb) / T); ED.fb + k * T < L.b; k++) blip(ED.fb + k * T, k % 4 === 0 ? 2000 : 1300, 0.25, 0.02); }
-  const mk = ED.sel && ED.m[ED.sel] != null ? ED.m[ED.sel] : null; if (mk != null && mk >= L.a && mk < L.b) blip(mk, 3200, 0.45, 0.05);
+  const mv = $('ed-click').getAttribute('aria-pressed') === 'true' ? 0.35 : 1;   // clic actif : la musique passe en dessous
+  for (let c = 0; c < ch; c++){ const src = buf.getChannelData(c), dst = out.getChannelData(c); for (let i = 0; i < n; i++){ const j = s0 + i; dst[i] = j >= 0 && j < src.length ? src[j] * mv : 0; } }
+  const blip = (tm, f, amp, dur) => { const i0 = Math.round((tm - L.a) * sr), m = Math.round(dur * sr); for (let c = 0; c < ch; c++){ const dst = out.getChannelData(c); for (let i = 0; i < m && i0 + i < n; i++){ if (i0 + i < 0) continue; dst[i0 + i] += amp * (0.6 * Math.sign(Math.sin(2 * Math.PI * f * i / sr)) + 0.4 * Math.sin(2 * Math.PI * f * i / sr)) * Math.exp(-i / (m * 0.3)); } } };
+  if ($('ed-click').getAttribute('aria-pressed') === 'true'){ const T = edT(); for (let k = Math.ceil((L.a - ED.fb) / T); ED.fb + k * T < L.b; k++) blip(ED.fb + k * T, k % 4 === 0 ? 3200 : 2400, 0.7, 0.025); }
+  const mk = ED.sel && ED.m[ED.sel] != null ? ED.m[ED.sel] : null; if (mk != null && mk >= L.a && mk < L.b) blip(mk, 4400, 0.8, 0.06);
   return out;
 }
 function edLoop(bars){
@@ -2766,7 +2767,9 @@ function edPlay(){
   if (ED.src){ edStop(); return; }
   const live = Object.values(decks).some(d => d.playing);
   if (live && route === 'normal'){ toast('Un son joue sur l\'enceinte : passe la sortie casque en « Câble séparateur » ou « Casque seul » pour écouter ici sans que le public l\'entende.'); return; }
-  const s = ctx.createBufferSource(); s.buffer = ED.t.buffer; s.connect(live ? cueBus : masterBus);
+  const s = ctx.createBufferSource(); s.buffer = ED.t.buffer;
+  const clickOn = $('ed-click').getAttribute('aria-pressed') === 'true', mg = ctx.createGain(); mg.gain.value = clickOn ? 0.35 : 1;   // clic actif : la musique passe en dessous
+  s.connect(mg); mg.connect(live ? cueBus : masterBus);
   const when = ctx.currentTime + 0.05; s.start(when, Math.max(0, ED.cur)); ED.src = s; ED.srcT0 = when; ED.srcOff = Math.max(0, ED.cur);
   ED.clickNext = Math.ceil((ED.srcOff - ED.fb) / edT());
   ED.clickOut = live ? cueBus : masterBus;
@@ -2776,7 +2779,7 @@ function edPlay(){
     if ($('ed-click').getAttribute('aria-pressed') === 'true'){   // clic sur chaque temps de la grille (plus aigu sur le 1er temps de la mesure)
       const T = edT(), now = ctx.currentTime;
       for (;;){ const tb = ED.fb + ED.clickNext * T, at = ED.srcT0 + (tb - ED.srcOff); if (at > now + 0.25) break;
-        if (at > now){ const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = ED.clickNext % 4 === 0 ? 2000 : 1300; g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.5, at + 0.001); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.03); o.connect(g); g.connect(ED.clickOut); o.start(at); o.stop(at + 0.04); }
+        if (at > now){ const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'square'; o.frequency.value = ED.clickNext % 4 === 0 ? 3200 : 2400; g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.9, at + 0.001); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.03); o.connect(g); g.connect(ED.clickOut); o.start(at); o.stop(at + 0.04); }
         ED.clickNext++; } } const p = ED.srcOff + (ctx.currentTime - ED.srcT0); if (p > ED.view + ED.span * 0.9) ED.view = p - ED.span * 0.1; edDraw(); ED.raf = requestAnimationFrame(loop); };
   ED.raf = requestAnimationFrame(loop);
 }
@@ -2838,7 +2841,8 @@ $('ed-lock').addEventListener('click', () => {
   toast(`🔒 Grille calée sur ${L.n} kicks — écart moyen ${L.errBefore.toFixed(1)} ms → ${L.errAfter.toFixed(1)} ms · ${ED.bpm.toFixed(3)} BPM`, 4000); edDraw();
 });
 $('ed-free').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); });
-$('ed-click').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); });
+$('ed-click').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'));
+  if (ED.loopAB) edLoopRefresh(); else if (ED.src){ edStop(); edPlay(); } });
 // BPM précis : K sur un kick au début, curseur sur un kick loin (fin du morceau) → BPM = nombre de temps / durée entre les deux
 $('ed-measure').addEventListener('click', () => {
   const T0 = edT(), g = ED.fb + Math.round((ED.cur - ED.fb) / T0) * T0;   // le kick de la grille le plus proche du curseur

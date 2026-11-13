@@ -959,7 +959,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 94</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 95</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2498,7 +2498,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
   let e = []; try { e = barEnergy(t); } catch(_){}
   const mx = Math.max(1e-9, ...e), around = b => b == null ? null : e.slice(Math.max(0, b - 4), b + 4).map(v => Math.round(100 * v / mx)).join(' ');
   return {nom: t.name, bpm: t.bpm, mesure: t.dbInfo || null, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar,
-    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, verrou_kicks: t.lockInfo || null, grille_a_verifier: t.gridWarn || null, bpm_a_verifier: t.bpmWarn || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
+    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, verrou_kicks: t.lockInfo || null, tempo_peigne: t.combInfo || null, grille_a_verifier: t.gridWarn || null, bpm_a_verifier: t.bpmWarn || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
     grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
@@ -3237,6 +3237,9 @@ async function prepItem(t){
       if (!t.peaks) t.peaks = computePeaks(t.buffer);
       { const tf = tempoFix(t); if (tf){ t.bpm = tf.bpm; t.firstBeat = t.start = tf.fb; t.tempoFixed = `${tf.from.toFixed(2)} → ${tf.bpm.toFixed(2)}`; } }
       const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
+      try { const cb = combTempo(t, t.bpm);
+        if (Math.abs(cb.bpm - t.bpm) > 0.02 && cb.score > 1.2 * cb.scoreCur){ const Tn = 60 / cb.bpm; t.combInfo = `${t.bpm.toFixed(3)} → ${cb.bpm.toFixed(3)} BPM (peigne ${cb.scoreCur.toFixed(2)} → ${cb.score.toFixed(2)})`;
+          t.bpm = cb.bpm; t.firstBeat = t.start = cb.phase + Math.round((t.firstBeat - cb.phase) / Tn) * Tn; } } catch(e){}
       // K posé à la main : il choisit QUEL kick est le départ, mais reste collé pile sur la grille mesurée
       if (!t.peaks) t.peaks = computePeaks(t.buffer);
       { const db = downbeat(t); t.firstBeat = t.start = db.fb; t.dbInfo = db;
@@ -3260,6 +3263,15 @@ async function prepItem(t){
     if (!t.peaks) t.peaks = computePeaks(t.buffer);
     structureOf(t);
     // Grille réglée à la main mais qui ne tombe pas sur les vrais kicks (ex. 33 ms à côté, ou BPM qui glisse) → on prévient
+    if (t.manualGrid && !t._combChecked){ t._combChecked = true;
+      try { const cb = combTempo(t, t.bpm);
+        if (Math.abs(cb.bpm - t.bpm) > 0.02 && cb.score > 1.3 * cb.scoreCur){
+          const Tn = 60 / cb.bpm, nfb = cb.phase + Math.round((t.firstBeat - cb.phase) / Tn) * Tn;
+          t.bpmWarn = null; t.gridWarn = `BPM corrigé au peigne : ${t.bpm.toFixed(3)} → ${cb.bpm.toFixed(3)} (accord ${cb.scoreCur.toFixed(2)} → ${cb.score.toFixed(2)})`;
+          toast(`🎯 « ${t.name} » : le vrai tempo est ${cb.bpm.toFixed(3)} BPM (tu avais ${t.bpm.toFixed(3)}). Grille corrigée, tes repères K, B1, B2, C ne bougent pas.`, 7000);
+          t.bpm = cb.bpm; t.firstBeat = nfb; t.markers.bpm = cb.bpm; t.markers.grid = nfb; t.barE = t.barR = null; t.struct = null; structureOf(t); t._gridChecked = true;
+          if (t.id) saveTrack(t);
+        } } catch(e){} }
     if (t.manualGrid && !t._gridChecked){ t._gridChecked = true;
       try { const L = gridLock(t, t.bpm, t.firstBeat);
         const dv = L ? L.driftBefore.filter(v => v != null) : [], drng = dv.length > 2 ? Math.max(...dv) - Math.min(...dv) : 0;
@@ -3483,6 +3495,39 @@ function spliceScan(t, bpm, fb){
   const out = []; for (let i = 1; i < seg.length - 1; i++){ const j1 = seg[i].m - seg[i - 1].m, j2 = seg[i + 1].m - seg[i].m;
     if (Math.abs(j1) > 0.015 && Math.abs(j2) < 0.008 && seg[i].a - seg[i - 1].a < W * 1.5) out.push({t: seg[i].a, ms: Math.round(j1 * 1000)}); }
   return out;
+}
+// ===== Tempo « au peigne » sur tout le morceau =====
+// On écoute les attaques à la milliseconde dans 2 bandes : les graves (corps du kick) et les aigus (le CLIC du kick).
+// Pour chaque BPM candidat, on pose une grille (toutes les positions de départ, au ms) et on additionne les attaques
+// qui tombent dessus sur TOUT le morceau. Le vrai BPM est celui où ça « résonne » le plus. Un BPM faux de 0,05 seulement
+// fait glisser la grille de plusieurs dizaines de ms sur le morceau : le peigne le voit tout de suite.
+function combEnv(t){
+  if (t._comb) return t._comb;
+  const buf = t.buffer, sr = buf.sampleRate, L = buf.getChannelData(0), Rr = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L, hop = Math.round(sr / 1000), n = Math.floor(L.length / hop), rate = sr / hop;
+  const bq = (type, f) => { const w = 2 * Math.PI * f / sr, al = Math.sin(w) / Math.SQRT2, c = Math.cos(w), a0 = 1 + al;
+    return type === 'lp' ? [(1 - c) / 2 / a0, (1 - c) / a0, (1 - c) / 2 / a0, -2 * c / a0, (1 - al) / a0] : [(1 + c) / 2 / a0, -(1 + c) / a0, (1 + c) / 2 / a0, -2 * c / a0, (1 - al) / a0]; };
+  const band = co => { const e = new Float32Array(n); let x1 = 0, x2 = 0, y1 = 0, y2 = 0, x3 = 0, x4 = 0, z1 = 0, z2 = 0;
+    for (let i = 0, k = 0; k < n; k++){ let m = 0; for (let j = 0; j < hop; j++, i++){ const x = (L[i] + Rr[i]) * 0.5;
+      const y = co[0] * x + co[1] * x1 + co[2] * x2 - co[3] * y1 - co[4] * y2; x2 = x1; x1 = x; y2 = y1; y1 = y;
+      const z = co[0] * y + co[1] * x3 + co[2] * x4 - co[3] * z1 - co[4] * z2; x4 = x3; x3 = y; z2 = z1; z1 = z; const a = Math.abs(z); if (a > m) m = a; }
+      e[k] = Math.log(m + 1e-4); }
+    const o = new Float32Array(n); for (let k = 10; k < n; k++){ const d = e[k] - e[k - 10]; o[k] = d > 0 ? d : 0; }
+    const s = Array.from(o.filter((v, i) => i % 7 === 0)).sort((a, b) => a - b), q = s[Math.floor(s.length * 0.99)] || 1; for (let k = 0; k < n; k++) o[k] = Math.min(1.5, o[k] / q);
+    return o; };
+  const lo = band(bq('lp', 150)), hi = band(bq('hp', 3000)), e = new Float32Array(n); for (let k = 0; k < n; k++) e[k] = lo[k] + hi[k];
+  return (t._comb = {e, rate, n});
+}
+function combScore(C, bpm, step = 1){
+  const T = 60 / bpm * C.rate, a = Math.floor(C.n * 0.04), b = Math.floor(C.n * 0.96), e = C.e; let best = 0, bd = 0;
+  for (let d = 0; d < T; d += step){ let s = 0, m = 0; for (let x = a + d; x < b; x += T){ s += e[Math.round(x)]; m++; } s /= m; if (s > best){ best = s; bd = d; } }
+  return {s: best, phase: (a + bd) / C.rate};
+}
+function combTempo(t, b0){
+  const C = combEnv(t); let best = {bpm: b0, ...combScore(C, b0)}; const cur = best.s;
+  for (let b = b0 * 0.985; b <= b0 * 1.015; b += 0.05){ const r = combScore(C, b, 3); if (r.s > best.s) best = {bpm: b, ...r}; }
+  const c0 = best.bpm; best = {bpm: c0, ...combScore(C, c0)}; for (let b = c0 - 0.06; b <= c0 + 0.06; b += 0.004){ const r = combScore(C, b, 2); if (r.s > best.s) best = {bpm: b, ...r}; }
+  for (const rb of [Math.round(best.bpm), Math.round(best.bpm * 2) / 2]){ if (Math.abs(rb - best.bpm) < 0.01){ const r = combScore(C, rb); if (r.s >= best.s * 0.97) best = {bpm: rb, ...r}; } }   // tempo rond si le peigne l'accepte
+  return {bpm: best.bpm, phase: best.phase, score: best.s, scoreCur: cur};
 }
 function gridLock(t, bpm, fb){
   // Calage robuste, même sur les kicks hardstyle (clic + corps) : le morceau est découpé en tranches de 16 temps,

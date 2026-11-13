@@ -959,7 +959,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 92</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 93</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2681,6 +2681,13 @@ function edDraw(){
     g.fillStyle = 'rgba(32,230,232,.18)'; g.fillRect(ED.view / dur * W, 0, Math.max(2, ED.span / dur * W), H);
     for (const k in ED_COL){ const v = ED.m[k]; if (v == null) continue; const x = v / dur * W; g.fillStyle = ED_COL[k]; g.fillRect(x - 1.5, 0, 3, H); g.font = 'bold 22px monospace'; g.fillText(ED_LBL[k], x + 4, 22); }
     if (cAuto != null){ const x = cAuto / dur * W; g.globalAlpha = 0.6; g.fillStyle = ED_COL.cut; for (let y = 0; y < H; y += 10) g.fillRect(x - 1.5, y, 3, 6); g.font = 'bold 22px monospace'; g.fillText('C auto', x + 4, 22); g.globalAlpha = 1; }
+    // Courbe « kicks / grille » : un point par kick = de combien il tombe avant (haut) ou après (bas) la grille.
+    // Ligne plate au milieu = BPM juste. Pente = BPM un peu faux. Marches = coupures de montage dans le son.
+    { const ks = ED.t.fitInfo && ED.t.fitInfo.kicks, T = edT(), lim = 0.06;
+      if (ks && ks.length){ g.globalAlpha = 0.5; g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(0, H * 0.62, W, H * 0.38); g.globalAlpha = 1;
+        g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(0, H * 0.81, W, 1);
+        for (const x of ks){ let r = (x - ED.fb) / T; r = (r - Math.round(r)) * T; const y = H * 0.81 + clamp(r / lim, -1, 1) * H * 0.18;
+          g.fillStyle = Math.abs(r) < 0.008 ? '#3dffb0' : Math.abs(r) < 0.02 ? '#ffb13d' : '#ff4d6d'; g.fillRect(x / dur * W - 1.5, y - 1.5, 3, 3); } } }
     g.fillStyle = '#fff'; g.fillRect(ED.cur / dur * W - 1, 0, 2, H); }
   // zoom, depuis le son brut
   { const cv = $('ed-zoom'), g = edFit(cv), W = cv.width, H = cv.height, sr = t.buffer.sampleRate;
@@ -2709,7 +2716,8 @@ function edDraw(){
   $('ed-bpm').textContent = ED.bpm.toFixed(2);
   const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
   if (ED.t && ED.driftFor !== ED.bpm + '|' + ED.fb){ ED.driftFor = ED.bpm + '|' + ED.fb; try { const L = gridLock(ED.t, ED.bpm, ED.fb); ED.driftTxt = L ? ` · Kicks / grille : ${L.driftBefore.map(v => v == null ? '–' : (v > 0 ? '+' : '') + v).join(' / ')} ms (début → fin)${Math.max(...L.driftBefore.filter(v => v != null).map(Math.abs)) > 12 ? ' ⚠ décalée : touche 🔒' : ' ✓'}` : ''; } catch(e){ ED.driftTxt = ''; } }
-  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (64 temps après B2, 32 si trop près de la fin)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}${ED.driftTxt || ''}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
+  if (ED.t && ED.spFor !== ED.bpm + '|' + ED.fb){ ED.spFor = ED.bpm + '|' + ED.fb; try { const sp = spliceScan(ED.t, ED.bpm, ED.fb); ED.spTxt = sp.length ? ` · ⚠ ${sp.length} coupure(s) de montage (kicks qui sautent de ${sp.map(q => (q.ms > 0 ? '+' : '') + q.ms).join(', ')} ms à ${sp.map(q => edBarNo(q.t)).join(', ')}) : la grille ne peut pas coller partout, cale-la sur la zone de tes repères` : ''; } catch(e){ ED.spTxt = ''; } }
+  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (64 temps après B2, 32 si trop près de la fin)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}${ED.driftTxt || ''}${ED.spTxt || ''}. Courbe en bas de la vue d'ensemble : points verts au milieu = clic pile sur les kicks. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
 }
 // Vérifier un son AVANT de le mixer : il est analysé (sans platine) puis ouvert dans l'éditeur
 async function checkItem(t, rest){
@@ -3467,6 +3475,15 @@ function kickOnsets(buf){
 // Verrou de grille sur les kicks (comme le « grid lock » des logiciels pro) :
 // pour chaque temps de la grille, on cherche l'attaque de kick la plus forte tout près (± 20 % du temps) au ms près,
 // on ignore les temps sans kick et les contretemps (reverse bass, basses roulantes), puis droite robuste → BPM et départ exacts.
+// Coupures de montage (souvent dans les « previews ») : la position des kicks fait un SAUT d'un coup par rapport à la grille
+function spliceScan(t, bpm, fb){
+  const ks = t.fitInfo && t.fitInfo.kicks; if (!ks || ks.length < 64) return [];
+  const T = 60 / bpm, W = 16 * T, D = t.buffer.duration, med = r => { const v = [...r].sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
+  const seg = []; for (let a = 0; a < D; a += W){ const r = Array.from(ks).filter(x => x >= a && x < a + W).map(x => { let q = (x - fb) / T; return (q - Math.round(q)) * T; }); if (r.length >= 8) seg.push({a, m: med(r)}); }
+  const out = []; for (let i = 1; i < seg.length - 1; i++){ const j1 = seg[i].m - seg[i - 1].m, j2 = seg[i + 1].m - seg[i].m;
+    if (Math.abs(j1) > 0.015 && Math.abs(j2) < 0.008 && seg[i].a - seg[i - 1].a < W * 1.5) out.push({t: seg[i].a, ms: Math.round(j1 * 1000)}); }
+  return out;
+}
 function gridLock(t, bpm, fb){
   // Points = les attaques de kick mesurées à l'analyse (détecteur multibande, le plus fiable). Les contretemps sont écartés.
   const ks = t.fitInfo && t.fitInfo.kicks ? Array.from(t.fitInfo.kicks) : null; if (!ks || ks.length < 40 || !t.buffer) return null;

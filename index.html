@@ -265,6 +265,7 @@ button{cursor:pointer}
 .edgrp{display:flex;align-items:center;gap:6px}
 .edgrp button{height:44px;min-width:52px;padding:0 12px;border-radius:6px;border:1px solid #2e3a3c;background:#141a1c;color:#e9fbfc;font:600 16px var(--font-ui,inherit);touch-action:manipulation}
 .edgrp button:active{background:#22302f}
+.edgrp button.sel{outline:2px solid #fff;outline-offset:1px}
 .edgrp b{font-family:var(--font-lcd);font-size:26px;color:#3dffb0;min-width:110px;text-align:center}
 .edlbl{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
 .edinfo{font-family:var(--font-lcd);font-size:15px;color:#cfe3e5;flex:1;min-width:0}
@@ -920,6 +921,10 @@ body[data-skin="psy"] .bline{visibility:hidden}
           <div class="edgrp"><span class="edlbl">Poser au curseur</span><button data-em="kick" class="mk-k">K</button><button data-em="bass" class="mk-b1">B1</button><button data-em="bass2" class="mk-b2">B2</button><button data-em="out" class="mk-f">F</button><button data-em="cut" class="mk-c">C</button><button data-em="cutx" title="Enlever C">C ✕</button><button id="ed-free" class="edtog" aria-pressed="false" title="Libre : C exactement au curseur, B1/B2/F sur le temps le plus proche (au lieu de la mesure), K sans aimant">Mode libre</button></div>
           <span id="ed-info" class="edinfo"></span>
         </div>
+        <div class="edbar">
+          <div class="edgrp"><span class="edlbl">Aller au repère</span><button data-go="kick" class="mk-k">K</button><button data-go="bass" class="mk-b1">B1</button><button data-go="bass2" class="mk-b2">B2</button><button data-go="cut" class="mk-c">C</button><button data-go="out" class="mk-f">F</button></div>
+          <div class="edgrp"><span class="edlbl" id="ed-sel">Affiner —</span><button data-mb="-1">◀ 1 temps</button><button data-mn="-0.01">◀◀ 10 ms</button><button data-mn="-0.001">◀ 1 ms</button><button data-mn="0.001">1 ms ▶</button><button data-mn="0.01">10 ms ▶▶</button><button data-mb="1">1 temps ▶</button></div>
+        </div>
       </div>
     </div>
   </div>
@@ -952,7 +957,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 85</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 86</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1569,7 +1574,7 @@ class Deck {
     this.post = gain(1); this.dry = gain(1); this.out = gain(1);
     this.fader = gain(1); this.xf = gain(1); this.cue = gain(0);
     this.an = c.createAnalyser(); this.an.fftSize = 512; this.anBuf = new Float32Array(512);
-    this.input.connect(this.lo); this.lo.connect(this.mid); this.mid.connect(this.hi); this.hi.connect(this.filt); this.filt.connect(this.post);
+    this.trimG = gain(1); this.input.connect(this.trimG); this.trimG.connect(this.lo); this.lo.connect(this.mid); this.mid.connect(this.hi); this.hi.connect(this.filt); this.filt.connect(this.post);
     this.post.connect(this.dry); this.dry.connect(this.out);
     this.gate = gain(1); this.out.connect(this.gate); this.gate.connect(this.fader); this.fader.connect(this.xf); this.xf.connect(masterBus); this.fader.connect(this.an);
     this.out.connect(this.cue); this.cue.connect(cueBus);
@@ -1647,6 +1652,8 @@ class Deck {
   load(item){
     this.pause();
     this.item = item; this.buffer = item.buffer; this.bpm = item.bpm; this.firstBeat = item.firstBeat || 0;
+    if (item.gainTrim == null && item.buffer){ const lv = levelTrim(item.buffer); item.gainTrim = lv.trim; item.lvlInfo = lv; }
+    this.trimG.gain.setValueAtTime(item.gainTrim ?? 1, ctx.currentTime);
     if (!item.peaks) item.peaks = computePeaks(item.buffer);
     this.peaks = item.peaks; structureOf(item);
     this.offset = 0; this.cue = item.start ?? this.firstBeat; this.rate = 1; this.overDirty = true; this.applyFx();
@@ -2436,7 +2443,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
   let e = []; try { e = barEnergy(t); } catch(_){}
   const mx = Math.max(1e-9, ...e), around = b => b == null ? null : e.slice(Math.max(0, b - 4), b + 4).map(v => Math.round(100 * v / mx)).join(' ');
   return {nom: t.name, bpm: t.bpm, mesure: t.dbInfo || null, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar,
-    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
+    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
     grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
@@ -2583,7 +2590,7 @@ function openEditorItem(t, d, cur){
   const st = structureOf(t);
   ED.d = d; ED.t = t; ED.bpm = t.bpm; ED.fb = t.firstBeat;
   ED.m = {kick: t.start ?? t.firstBeat, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: t.markers && t.markers.cut != null ? t.markers.cut : null};
-  ED.reset = false; ED.touched = new Set(); ED.exact = new Set((t.markers && t.markers.exact) || []); $('ed-free').setAttribute('aria-pressed', 'false');   // à l'ouverture : curseur sur les repères de la grille
+  edSelect(null); ED.reset = false; ED.touched = new Set(); ED.exact = new Set((t.markers && t.markers.exact) || []); $('ed-free').setAttribute('aria-pressed', 'false');   // à l'ouverture : curseur sur les repères de la grille
   ED.cur = cur ?? t.firstBeat; ED.span = 4 * 4 * 60 / t.bpm; ED.view = Math.max(0, ED.cur - ED.span / 3);
   $('ed-title').textContent = `Éditeur · ${t.name}`;
   $('ed-save').textContent = ED.list && ED.list.length ? `Enregistrer · suivant (${ED.list.length})` : 'Enregistrer';
@@ -2691,7 +2698,25 @@ document.addEventListener('click', e => {
     else { ED.m[k] = edSnapBar(ED.cur); ED.exact && ED.exact.delete(k); } }
   edDraw();
 });
-$('ed-zin').addEventListener('click', () => { if (ED.span > 0.3){ const c = ED.cur; ED.span /= 2; ED.view = c - ED.span / 3; edDraw(); } });
+// Aller à un repère (et le sélectionner), puis l'affiner au ms près ou d'un temps
+const ED_NAME = {kick: 'K', bass: 'B1', bass2: 'B2', cut: 'C', out: 'F'};
+function edSelect(k){
+  ED.sel = k; document.querySelectorAll('[data-go]').forEach(b => b.classList.toggle('sel', b.dataset.go === k));
+  $('ed-sel').textContent = k ? `Affiner ${ED_NAME[k]}` : 'Affiner —';
+}
+document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => {
+  const k = b.dataset.go; let x = ED.m[k];
+  if (x == null && k === 'cut'){ const T = edT(); x = ED.m.bass2 != null ? autoCutTime(ED.m.bass2, T, ED.m.out, ED.t) : null; if (x != null){ ED.m.cut = x; ED.touched.add('cut'); } }
+  if (x == null){ toast(`Pas de ${ED_NAME[k]} sur ce son : place le curseur puis « Poser au curseur ».`, 2500); return; }
+  edSelect(k); ED.cur = x; if (ED.span > 8){ ED.span = 4 * 60 / ED.bpm; } ED.view = x - ED.span / 2; edDraw();
+}));
+document.querySelectorAll('[data-mn],[data-mb]').forEach(b => b.addEventListener('click', () => {
+  const k = ED.sel; if (!k || ED.m[k] == null){ toast('Choisis d\'abord un repère avec « Aller au repère ».', 2200); return; }
+  const d = b.dataset.mn != null ? parseFloat(b.dataset.mn) : parseFloat(b.dataset.mb) * edT();
+  ED.m[k] = Math.max(0, ED.m[k] + d); ED.touched.add(k); (ED.exact = ED.exact || new Set()).add(k);
+  ED.cur = ED.m[k]; if (ED.cur < ED.view || ED.cur > ED.view + ED.span) ED.view = ED.cur - ED.span / 2; edDraw();
+}));
+$('ed-zin').addEventListener('click', () => { if (ED.span > 0.05){ const c = ED.cur; ED.span /= 2; ED.view = c - ED.span / 3; edDraw(); } });
 $('ed-zout').addEventListener('click', () => { if (ED.span < 200){ const c = ED.cur; ED.span *= 2; ED.view = Math.max(-ED.span / 2, c - ED.span / 3); edDraw(); } });
 $('ed-play').addEventListener('click', edPlay);
 $('ed-free').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); });
@@ -3062,8 +3087,19 @@ async function loadItem(i, deckId){
   d.loading = null;
 }
 // Décode et analyse un son de la bibliothèque (sans le charger sur une platine)
+// Niveau d'entrée de chaque son (comme le gain/trim d'une table de mix) : simple volume, aucune compression.
+// Les sons masterisés très fort sont baissés pour que leurs crêtes restent sous -3 dB et que tous aient le même niveau.
+function levelTrim(buf){
+  const L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L, sr = buf.sampleRate, w = Math.round(sr * 0.05);
+  let peak = 0; const rms = [];
+  for (let s = 0; s + w <= L.length; s += w){ let a = 0; for (let i = s; i < s + w; i += 4){ const v = Math.max(Math.abs(L[i]), Math.abs(R[i])); if (v > peak) peak = v; a += L[i] * L[i] + R[i] * R[i]; } rms.push(Math.sqrt(a / (w / 2))); }
+  rms.sort((x, y) => x - y); const loud = rms[Math.floor(rms.length * 0.9)] || 0.1;
+  const trim = Math.min(1.6, 0.25 / Math.max(loud, 1e-4), 0.7 / Math.max(peak, 1e-4));
+  return {trim, peakDb: 20 * Math.log10(peak + 1e-9), loudDb: 20 * Math.log10(loud + 1e-9)};
+}
 async function prepItem(t){
     if (!t.buffer) t.buffer = await decode(await t.file.arrayBuffer());
+    if (t.gainTrim == null){ const lv = levelTrim(t.buffer); t.gainTrim = lv.trim; t.lvlInfo = lv; }
     if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
       if (!t.peaks) t.peaks = computePeaks(t.buffer);
       { const tf = tempoFix(t); if (tf){ t.bpm = tf.bpm; t.firstBeat = t.start = tf.fb; t.tempoFixed = `${tf.from.toFixed(2)} → ${tf.bpm.toFixed(2)}`; } }
@@ -3209,13 +3245,15 @@ function drawOver(d){
   g.fillStyle = C.fg; g.fillRect(Math.round(px - u), 0, 2 * u, H);
 }
 
-function meterVal(level){ return clamp((20 * Math.log10(level + 1e-6) + 42) / 42, 0, 1); }
+function meterVal(level){ return clamp((20 * Math.log10(level + 1e-6) + 36) / 36, 0, 1); }
+// couleur d'un segment selon son niveau réel : vert < -9 dB, jaune -9 à -2 dB, rouge au-dessus de -2 dB (proche de la saturation)
+const segCol = (i, n) => { const top = -36 + (i + 1) * 36 / n; return top > -2 ? C.alert : top > -9 ? C.cue : C.go; };
 function drawVMeter(c, level){
   fit(c); const g = c.getContext('2d'); const W = c.width, H = c.height;
   g.fillStyle = '#040505'; g.fillRect(0, 0, W, H);
   const n = 14, gap = H * 0.014, h = (H - gap * (n - 1)) / n, on = Math.round(meterVal(level) * n);
   for (let i = 0; i < n; i++){
-    g.fillStyle = i >= n - 2 ? C.alert : i >= n - 5 ? C.cue : C.go;
+    g.fillStyle = segCol(i, n);
     g.globalAlpha = i < on ? 1 : 0.12; g.fillRect(0, H - (i + 1) * h - i * gap, W, h);
   }
   g.globalAlpha = 1;
@@ -3230,7 +3268,7 @@ function drawMasterMeters(m, h){
     g.fillStyle = r ? C.cue : '#4fb3b8'; g.fillText(t, 0, y + rowH / 2);
     const n = 24, gap = 2, w = (W - lab - gap * (n - 1)) / n, on = Math.round(meterVal(l) * n);
     for (let i = 0; i < n; i++){
-      g.fillStyle = i >= n - 3 ? C.alert : i >= n - 7 ? C.cue : C.go;
+      g.fillStyle = segCol(i, n);
       g.globalAlpha = i < on ? 1 : 0.14; g.fillRect(lab + i * (w + gap), y, w, rowH);
     }
     g.globalAlpha = 1;

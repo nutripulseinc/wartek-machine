@@ -952,7 +952,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 84</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 85</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1422,10 +1422,11 @@ function structureOf(t){
     }
     if (m.out == null && bo < nb){ let best = bo, bs = -Infinity; for (let k = Math.max(bi + 2, bo - 3); k <= Math.min(nb - 1, bo + 3); k++){ const j = (ev(k - 1) + ev(k - 2)) - (ev(k) + ev(k + 1)); if (j > bs + 1e-9){ bs = j; best = k; } } if (bs > 0.2 * (ref - flo)) bo = best; } }
   if (m.bass2 != null) b2 = Math.max(bi, Math.round((m.bass2 - t.firstBeat) / bar));
-  const bl = bar / 4, onBeat = x => t.firstBeat + Math.round((x - t.firstBeat) / bl) * bl;
+  const bl = bar / 4, exact = new Set(m.exact || []);
+  const onBeat = (x, k) => exact.has(k) ? x : t.firstBeat + Math.round((x - t.firstBeat) / bl) * bl;   // posé en mode libre : exact
   t._dbgBars = {graves_entre_kicks: e.slice(0, 48).map(v => Math.round(100 * v / (ref || 1))).join(' '), graves_mesure: Lb.slice(0, 48).map(v => Math.round(100 * v / (Lref || 1))).join(' '), seuils: [Math.round(100 * thr / (ref || 1)), Math.round(100 * Lthr / (Lref || 1))]};
-  t.struct = {drop: m.bass != null ? onBeat(m.bass) : t.firstBeat + bi * bar, outro: m.out != null ? onBeat(m.out) : t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph,
-              lastBass: b2 == null ? null : (m.bass2 != null ? onBeat(m.bass2) : t.firstBeat + b2 * bar), lastBar: b2};
+  t.struct = {drop: m.bass != null ? onBeat(m.bass, 'bass') : t.firstBeat + bi * bar, outro: m.out != null ? onBeat(m.out, 'out') : t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph,
+              lastBass: b2 == null ? null : (m.bass2 != null ? onBeat(m.bass2, 'bass2') : t.firstBeat + b2 * bar), lastBar: b2};
   return t.struct;
 }
 
@@ -2435,7 +2436,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
   let e = []; try { e = barEnergy(t); } catch(_){}
   const mx = Math.max(1e-9, ...e), around = b => b == null ? null : e.slice(Math.max(0, b - 4), b + 4).map(v => Math.round(100 * v / mx)).join(' ');
   return {nom: t.name, bpm: t.bpm, mesure: t.dbInfo || null, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar,
-    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, tempo_corrige: t.tempoFixed || null}; }
+    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
     grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
@@ -2582,7 +2583,7 @@ function openEditorItem(t, d, cur){
   const st = structureOf(t);
   ED.d = d; ED.t = t; ED.bpm = t.bpm; ED.fb = t.firstBeat;
   ED.m = {kick: t.start ?? t.firstBeat, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: t.markers && t.markers.cut != null ? t.markers.cut : null};
-  ED.reset = false; ED.touched = new Set(); $('ed-free').setAttribute('aria-pressed', 'false');   // à l'ouverture : curseur sur les repères de la grille
+  ED.reset = false; ED.touched = new Set(); ED.exact = new Set((t.markers && t.markers.exact) || []); $('ed-free').setAttribute('aria-pressed', 'false');   // à l'ouverture : curseur sur les repères de la grille
   ED.cur = cur ?? t.firstBeat; ED.span = 4 * 4 * 60 / t.bpm; ED.view = Math.max(0, ED.cur - ED.span / 3);
   $('ed-title').textContent = `Éditeur · ${t.name}`;
   $('ed-save').textContent = ED.list && ED.list.length ? `Enregistrer · suivant (${ED.list.length})` : 'Enregistrer';
@@ -2683,12 +2684,11 @@ document.addEventListener('click', e => {
   else if (b.dataset.gs){ const d = parseFloat(b.dataset.gs); ED.fb += d; ED.m.kick = ED.fb; }
   else { const k = b.dataset.em; ED.touched.add(k === 'cutx' ? 'cut' : k);
     const free = $('ed-free').getAttribute('aria-pressed') === 'true', T = edT(), snapBeat = x => ED.fb + Math.round((x - ED.fb) / T) * T;
-    if (free && k === 'kick'){ ED.fb = ED.cur; ED.m.kick = ED.cur; }
-    else if (free && k === 'cut') ED.m.cut = ED.cur;   // C libre : exactement au curseur
-    else if (free && k !== 'cutx') ED.m[k] = snapBeat(ED.cur);   // B1 / B2 / F libres : sur le temps le plus proche
-    else if (k === 'kick'){ const a = snapAttack(ED.t.buffer, ED.cur, 0.03); const x = a ?? ED.cur; ED.fb = x; ED.m.kick = x; ED.cur = x; if (a != null) toast('K collé sur l\'attaque du kick (aimant).', 1800); }   // K sur l'attaque exacte : la grille part d'ici
+    // Mode libre : le repère va EXACTEMENT au curseur, sans aucun aimant (la grille ne bouge pas)
+    if (free && k !== 'cutx'){ ED.m[k] = ED.cur; (ED.exact = ED.exact || new Set()).add(k); }
+    else if (k === 'kick'){ const a = snapAttack(ED.t.buffer, ED.cur, 0.03); const x = a ?? ED.cur; ED.fb = x; ED.m.kick = x; ED.cur = x; ED.exact && ED.exact.delete('kick'); if (a != null) toast('K collé sur l\'attaque du kick (aimant).', 1800); }   // K sur l'attaque exacte : la grille part d'ici
     else if (k === 'cutx') ED.m.cut = null;
-    else ED.m[k] = edSnapBar(ED.cur); }
+    else { ED.m[k] = edSnapBar(ED.cur); ED.exact && ED.exact.delete(k); } }
   edDraw();
 });
 $('ed-zin').addEventListener('click', () => { if (ED.span > 0.3){ const c = ED.cur; ED.span /= 2; ED.view = c - ED.span / 3; edDraw(); } });
@@ -2718,11 +2718,13 @@ $('ed-auto').addEventListener('click', () => {
 });
 $('ed-save').addEventListener('click', () => {
   const t = ED.t, d = ED.d; edStop();
-  t.bpm = ED.bpm; t.firstBeat = ED.fb; t.start = ED.touched.has('kick') ? ED.fb : (ED.m.kick ?? ED.fb); t.manualGrid = true;
+  t.bpm = ED.bpm; t.firstBeat = ED.fb; t.start = ED.m.kick ?? ED.fb; t.manualGrid = true;
   // On ne fige que ce qui a été réglé à la main (ou l'était déjà) : le reste reste automatique
   const old = ED.reset ? {} : (t.markers || {}), nm = {};
   const gridMan = old.bpm != null || ED.touched.has('kick') || Math.abs(ED.bpm - (t.autoBpm ?? ED.bpm)) > 0.001 || Math.abs(ED.fb - (t.autoFb ?? ED.fb)) > 0.001;
-  if (gridMan){ nm.bpm = ED.bpm; nm.grid = ED.fb; nm.kick = ED.touched.has('kick') ? ED.fb : (ED.m.kick ?? ED.fb); }
+  if (gridMan){ nm.bpm = ED.bpm; nm.grid = ED.fb; }
+  if (gridMan || ED.touched.has('kick')) nm.kick = ED.m.kick ?? ED.fb;
+  const ex = [...(ED.exact || [])].filter(k => k !== 'kick' && k !== 'cut'); if (ex.length) nm.exact = ex;
   for (const k of ['bass', 'bass2', 'out']) if ((ED.touched.has(k) || old[k] != null) && ED.m[k] != null) nm[k] = ED.m[k];
   if (ED.m.cut != null) nm.cut = ED.m.cut;
   nm.ok = true;   // son vérifié à la main
@@ -3076,7 +3078,7 @@ async function prepItem(t){
       t.autoBpm = t.bpm; t.autoFb = t.firstBeat;
       // Garde-fou : une grille / un K gardés en mémoire (anciennes versions) doivent tomber au DÉBUT du son.
       // Si le K mémorisé est après le début de la wave (ou avant 0), on l'ignore : K et grille repris de l'analyse.
-      if (t.markers && (t.markers.bpm || t.markers.kick != null)){
+      if (t.markers && !t.markers.ok && (t.markers.bpm || t.markers.kick != null)){   // (réglages vérifiés dans l'éditeur : respectés tels quels)
         const s0 = t.dbInfo && t.dbInfo.t0 != null ? t.dbInfo.t0 : t.autoFb, g = t.markers.bpm ? (t.markers.grid ?? t.markers.kick) : t.markers.kick;
         if (g != null && (g < -0.01 || (g - s0 > 0.04 && Math.abs(g - t.autoFb) > 0.03))){
           delete t.markers.bpm; delete t.markers.grid; delete t.markers.kick;
@@ -3085,7 +3087,7 @@ async function prepItem(t){
         }
       }
       if (t.markers && t.markers.bpm){ t.bpm = t.markers.bpm; t.firstBeat = t.markers.grid ?? t.firstBeat; t.start = t.markers.kick ?? t.firstBeat; t.manualGrid = true; }   // grille réglée à la main dans l'éditeur
-      else if (t.markers && t.markers.kick != null){ const bl = 60 / t.bpm; t.firstBeat = t.start = t.firstBeat + Math.round((t.markers.kick - t.firstBeat) / bl) * bl; } }
+      else if (t.markers && t.markers.kick != null){ t.start = t.markers.kick; } }   // K posé à la main : point de lancement exact, la grille reste
     if (!t.peaks) t.peaks = computePeaks(t.buffer);
     structureOf(t);
 }

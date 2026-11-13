@@ -1157,6 +1157,28 @@ function computePeaks(buf){
 // 1. détection des attaques sur 3 bandes (basses, médiums, aigus) sur tout le morceau
 // 2. tempo approximatif par autocorrélation
 // 3. tempo exact par régression sur chaque temps du morceau (précision ~0,01 BPM), puis repérage du 1er temps de la mesure
+// Vérification du tempo sur les KICKS (graves) : corrige les erreurs ×1,5 / ÷1,5 / ×2 / ÷2
+// (ex. un son à 205 lu à 136,67 parce que la grille tombait aussi sur les charlestons).
+// Le bon tempo est celui dont CHAQUE temps tombe sur un kick.
+function tempoFix(t){
+  const lo = t.peaks.lo, n = lo.length, dur = n / RES; if (dur < 20) return null;
+  const on = new Float32Array(n); for (let i = 2; i < n; i++) on[i] = Math.max(0, lo[i] - lo[i - 2]);
+  const a = dur * 0.15, b = dur * 0.85;
+  const score = c => { const T = 60 / c; let best = 0, bph = 0;
+    for (let ph = 0; ph < T; ph += 1 / RES){ let s = 0, m = 0;
+      for (let x = a + ph; x < b; x += T){ const j = Math.round(x * RES); if (j < 1 || j >= n - 1) continue; s += Math.max(on[j - 1], on[j], on[j + 1]); m++; }
+      if (m && s / m > best){ best = s / m; bph = ph; } }
+    return {c, s: best, ph: a + bph}; };
+  const b0 = t.bpm, cand = [b0, b0 * 1.5, b0 / 1.5, b0 * 2, b0 / 2].filter(c => c >= 70 && c <= 230).map(score);
+  const cur = cand[0]; let win = cur;
+  for (const x of cand) if (x.s > win.s) win = x;
+  if (win !== cur && win.s < 1.25 * cur.s) win = cur;              // il faut une nette différence pour changer
+  const dbl = cand.find(x => Math.abs(x.c - win.c * 2) < 0.01);    // tous les temps du double ont aussi un kick : c'est le double
+  if (dbl && dbl.s >= 0.85 * win.s) win = dbl;
+  if (win === cur) return null;
+  const T = 60 / win.c; let fb = win.ph % T; while (fb - T >= 0) fb -= T;
+  return {bpm: win.c, fb, from: b0};
+}
 async function analyzeBpm(buffer){
   const sr = 22050, dur = Math.min(buffer.duration, 480);
   const oc = new OfflineAudioContext(3, Math.ceil(dur * sr), sr);
@@ -3003,6 +3025,8 @@ async function loadItem(i, deckId){
 async function prepItem(t){
     if (!t.buffer) t.buffer = await decode(await t.file.arrayBuffer());
     if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
+      if (!t.peaks) t.peaks = computePeaks(t.buffer);
+      { const tf = tempoFix(t); if (tf){ t.bpm = tf.bpm; t.firstBeat = t.start = tf.fb; t.tempoFixed = `${tf.from.toFixed(2)} → ${tf.bpm.toFixed(2)}`; } }
       const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
       // K posé à la main : il choisit QUEL kick est le départ, mais reste collé pile sur la grille mesurée
       if (!t.peaks) t.peaks = computePeaks(t.buffer);
@@ -3366,7 +3390,14 @@ function downbeat(t){
     if (at0 != null && Math.abs(r) >= 0.3 * T && err(fb + r) < 0.5 * err(fb)){ shift = r; fb += r; q = Math.round(r / T * 4); } }
   // K = le temps de la grille au départ du son
   let k = fb + Math.round((t0 - fb) / T) * T;
-  if (Math.abs(k - t0) > 0.35 * T) k = fb + Math.ceil((t0 - fb) / T - 0.35) * T;   // le son démarre entre deux temps (pad, voix) : premier vrai temps
+  if (Math.abs(k - t0) > 0.35 * T){
+    // Le son démarre entre deux temps de la grille. Si le début du son est une attaque nette et que les kicks
+    // acceptent une grille posée sur ce début, K = pile le début de la wave (règle : K toujours au début du son).
+    const ks = t.fitInfo && t.fitInfo.kicks;
+    const e2 = f => { if (!ks) return 1; const r2 = []; for (const x of ks){ if (x < t0 - 0.05 || x > t0 + 64 * T) continue; const w = (x - f) / T; r2.push(Math.abs(w - Math.round(w)) * T); } if (r2.length < 8) return 1; r2.sort((p, q) => p - q); return r2[Math.floor(r2.length / 2)]; };
+    if (at0 != null && e2(t0) <= 1.3 * e2(fb) + 0.004){ shift += t0 - k; fb = t0; k = t0; }
+    else k = fb + Math.ceil((t0 - fb) / T - 0.35) * T;   // vraiment un pad / une voix avant le 1er temps : premier vrai temps
+  }
   const ak = snapAttack(t.buffer, k, 0.025); const off = ak != null && Math.abs(ak - k) < 0.02 ? ak - k : 0;
   return {fb: k + off, t0: +t0.toFixed(4), q, shift_ms: Math.round(shift * 1000)};
 }

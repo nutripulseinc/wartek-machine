@@ -122,6 +122,7 @@ button{cursor:pointer}
   background:linear-gradient(#30363a,#181c1e);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 3px 7px rgba(0,0,0,.65);
   display:grid;place-items:center;align-content:center;gap:1px;color:#cfe3e5;font:800 13px/1.05 var(--font-ui,inherit);letter-spacing:.14em}
 .bsync .led{position:absolute;top:7px;left:16px;right:16px;height:4px;border-radius:2px;background:#25373b;box-shadow:inset 0 1px 1px rgba(0,0,0,.7)}
+.fine{display:flex;gap:4px;margin-top:5px;width:84px}.fine button{flex:1;height:30px;border-radius:6px;border:1px solid #000;background:#16262a;color:#9fe;font-size:13px;touch-action:manipulation;cursor:pointer}.fine button:active{background:#20e6e8;color:#000}
 .bsync.lit{color:#fff}.bsync.lit .led{background:#20e6e8;box-shadow:0 0 9px #20e6e8,0 0 3px #fff}
 .bsync:active{transform:translateY(1px);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 1px 3px rgba(0,0,0,.7)}
 .synccol{gap:8px!important}
@@ -959,7 +960,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 99</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 100</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1881,6 +1882,7 @@ function panelMarkup(id){
         <div class="synccol">
           <div class="bpmlcd"><span id="${id}-bpm">—</span><small>BPM</small></div>
           <button class="bsync" id="${id}-sync" aria-label="Synchroniser le BPM sur l'autre platine"><i class="led"></i><b>BEAT</b><b>SYNC</b></button>
+          <div class="fine"><button id="${id}-fm" aria-label="Calage fin : ce son est en avance, le retenir de 2 ms">◀</button><button id="${id}-fp" aria-label="Calage fin : ce son est en retard, l'avancer de 2 ms">▶</button></div>
         </div>
         <div class="playcol">
           <button class="cuebtn" id="${id}-back" aria-label="CUE : retour au point de départ"><span>CUE</span><small>retour</small></button>
@@ -1981,6 +1983,15 @@ function bindDeck(d){
     d.unload();
   });
   d.ui.sync.addEventListener('click', () => syncDeck(d));
+  // Calage fin à l'oreille (comme toucher le jog) : 2 ms par appui, en douceur (0,3 % de vitesse, inaudible).
+  // Retenu avec le morceau : aux prochains mix, son point de basse est calé avec cette correction.
+  const fine = sg => { if (!d.playing || !d.item || d.nudging) return; const x = sg * 0.002;
+    d.nudge(x, Math.max(0.5, Math.abs(x) / 0.003));
+    const t = d.item; t.markers = t.markers || {}; t.markers.fine = Math.round(((t.markers.fine || 0) + x) * 1000) / 1000;
+    if (plan) plan.fineLog = (plan.fineLog || []).concat(`${d.id} ${sg > 0 ? '+' : '-'}2`);
+    lockInfo = {t: ctx.currentTime, txt: `CALAGE FIN ${d.id} ${t.markers.fine > 0 ? '+' : ''}${Math.round(t.markers.fine * 1000)} ms`};
+    clearTimeout(d._fineSave); d._fineSave = setTimeout(() => { try { if (t.id) saveTrack(t); } catch(e){} }, 1500); };
+  $(`${id}-fp`).addEventListener('click', () => fine(1)); $(`${id}-fm`).addEventListener('click', () => fine(-1));
   el('qfile').addEventListener('change', e => {
     const files = [...e.target.files]; e.target.value = ''; $('qpick').hidden = true;
     if (!files.length) return;
@@ -2239,6 +2250,8 @@ function makePlan(o, n){
   // B2 (sortant) et B1 (entrant) lus au kick près, même méthode des deux côtés : B1 tombe pile sur B2
   const snap = {}; { const a = kickSnap(o.item, so.lastBass), b = kickSnap(n.item, sn.drop);
     if (a.d != null){ so.lastBass = a.t; snap.B2_sort_ms = Math.round(a.d * 1000); } if (b.d != null){ sn.drop = b.t; snap.B1_entre_ms = Math.round(b.d * 1000); } }
+  { const fo = (o.item.markers && o.item.markers.fine) || 0, fn = (n.item.markers && n.item.markers.fine) || 0;   // calage fin réglé à l'oreille
+    if (so.lastBass != null && fo) so.lastBass += fo; if (sn.drop != null && fn) sn.drop += fn; if (fo || fn){ snap.fin_sort_ms = Math.round(fo * 1000); snap.fin_entre_ms = Math.round(fn * 1000); } }
   let r = tempoRatio(o, n); const synced = Math.abs(r - 1) <= 0.16; if (!synced) r = 1;
   const ob = o.beatLen, nb = n.beatLen, pos = o.pos(), lead = 1.2 * o.rate;
   const E = endOfMusic(o.item);
@@ -2432,8 +2445,7 @@ function startTransition(dt){
   // Du swap (B2) jusqu'à C : A reste comme il est (basses coupées, CFX léger du swap), pas de changement.
   if (st === 'flanger'){
     for (let i = 0; i <= n8; i += 2) schedule(o, 'fx', {name: 'flanger', amt: 0.1 + 0.55 * i / Math.max(1, n8)}, pre8 + i * beat, 0.25);
-    schedule(o, 'fx', {name: 'flanger', amt: 0.3}, tDrop + 2 * beat, 0.4);
-    schedule(o, 'fx', {name: 'none'}, tDrop + bar, 0.5);
+    schedule(o, 'fx', {name: 'none'}, tDrop, 0.05);   // pas de flanger sur le drop : B1 et B2 restent nets
   } else if (st === 'crush'){
     for (let i = 0; i <= n8; i += 2) schedule(o, 'fx', {name: 'crush', amt: 0.1 + 0.5 * i / Math.max(1, n8)}, pre8 + i * beat, 0.15);
     schedule(o, 'fx', {name: 'none'}, tDrop, 0.35);
@@ -2444,6 +2456,11 @@ function startTransition(dt){
   // - si le son qui entre part en break avant : A coupé NET sur ce temps (on ne le laisse pas tout seul).
   const tCut = tDrop + plan.cutBars * bar, tailB = Math.round(plan.tailBars * 4), tF = tCut + tailB * beat;
   const tBreak = plan.cutBar != null ? tDrop + plan.cutBar * bar : null, tStop = tBreak ?? tF;
+  // Marge pendant que les deux sons jouent ensemble (B1 sur B2) : -2 dB sur chaque platine.
+  // Deux sons forts additionnés tapent dans le limiteur, qui écrase et fait « vaciller » le son : on lui laisse de la place.
+  if (plan.synced){ const head = 0.8;
+    schedule(o, 'gate', head, tDrop - beat, beat * 0.5); schedule(n, 'gate', head, tDrop - beat, beat * 0.5);
+    schedule(n, 'gate', 1, tStop, 2 * beat); }
   { const steps = Math.max(1, Math.ceil(tailB / 16)), fStart = cfx > 0 ? 45 : -40, fEnd = cfx > 0 ? 62 : -58;
     for (let s = 1; s <= steps; s++){
       const t = tCut + (s - 1) * 16 * beat, f = s / steps; if (t >= tStop - 0.01) break;
@@ -2511,7 +2528,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
     basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, verrou_kicks: t.lockInfo || null, tempo_peigne: t.combInfo || null, nettete_tempo: t.combConf != null ? +t.combConf.toFixed(2) : null, grille_a_verifier: t.gridWarn || null, bpm_a_verifier: t.bpmWarn || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
-    grille_locale: p.local || null, calage_basses_ms: p.snap || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
+    grille_locale: p.local || null, calage_basses_ms: p.snap || null, calage_fin_touches: p.fineLog || [], oreille_ms: p.earLog || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
   if (DIAG.length > 6) DIAG.shift();
 }
 function finishTransition(){

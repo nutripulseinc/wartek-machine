@@ -951,6 +951,10 @@ body[data-skin="psy"] .bline{visibility:hidden}
           </div>
         </div>
         <div class="sgroup">
+          <h3>Version</h3>
+          <p class="snote" id="appver">WARTEK MACHINE · version 81</p>
+        </div>
+        <div class="sgroup">
           <h3>Mode léger</h3>
           <p class="snote">Si le son crépite sur ton téléphone : coupe les animations du thème (scintillements, sang, néons qui bougent…) et ralentit le dessin des écrans. Le son garde toute la puissance du téléphone. Le thème reste, il ne bouge plus.</p>
           <button class="dbtn" id="lite" aria-pressed="false" style="width:max-content">Activer le mode léger</button>
@@ -2087,18 +2091,22 @@ function restoreDeck(d){
 // le petit creux de fin de phrase (B2 + 64 temps, sinon +80, sinon +96 temps). Pas de creux trouvé : B2 + 64 temps.
 // Si A coupe avant (F, fin de sa basse), C tombe pile sur cette coupure.
 function autoCutTime(P, beat, F, t){
-  const tgt = P + 64 * beat;
-  if (F != null && F >= P + 4 * beat && F < tgt - beat * 0.5) return F;
+  // Fin utile du son qui sort : F (fin de sa basse) sinon la fin du morceau
+  const dur = t && t.buffer ? t.buffer.duration : Infinity, end = Math.min(F != null && F > P ? F : Infinity, dur - 4 * beat);
+  // 64 temps après B2 ; si ça dépasse la fin → 32 temps ; si même 32 ne tient pas → pile sur F
+  let base = 64; if (P + 64 * beat > end + beat * 0.5) base = 32;
+  if (P + base * beat > end + beat * 0.5) return F != null && F > P ? F : P + 32 * beat;
+  const tgt = P + base * beat;
   const pk = t && t.peaks; if (!pk) return tgt;
+  // On se cale sur la sortie de la phrase : la 1re basse qui repart après le petit creux (base, +16, +32 temps), sans dépasser la fin
   const n = pk.lo.length, med = (arr, s0, s1) => { const v = Array.from(arr.subarray(Math.max(0, s0), Math.min(n, s1))).sort((x, y) => x - y); return v[Math.floor(v.length / 2)] || 1e-6; };
   const s0 = Math.floor(P * RES), s1 = Math.floor((P + 96 * beat) * RES), mLo = med(pk.lo, s0, s1), mRm = med(pk.rms, s0, s1);
   const bx = tm => { const a = Math.floor((tm + 0.1 * beat) * RES), b = Math.floor((tm + 0.9 * beat) * RES); let acc = 0, c = 0; for (let i = Math.max(0, a); i < Math.min(n, b); i++){ acc += pk.lo[i] / mLo + pk.rms[i] / mRm; c++; } return c ? acc / c : 0; };
-  const end = Math.min(F != null ? F : Infinity, t.buffer ? t.buffer.duration - 4 * beat : Infinity);
   for (let j = 0; j <= 2; j++){
     const c = tgt + j * 16 * beat; if (c > end) break;
     const ref = []; for (let q = 3; q <= 16; q++) ref.push(bx(c - q * beat)); ref.sort((x, y) => x - y);
     const r = ref[Math.floor(ref.length / 2)] || 0, pre = Math.min(bx(c - beat), bx(c - 2 * beat)), post = bx(c);
-    if (r > 0 && pre < 0.8 * r && post > 1.2 * pre) return c;   // creux juste avant, la basse repart sur c
+    if (r > 0 && pre < 0.8 * r && post > 1.2 * pre) return c;
   }
   return tgt;
 }
@@ -2594,7 +2602,7 @@ function edDraw(){
     if (ED.src){ const p = ED.srcOff + (ctx.currentTime - ED.srcT0); g.fillStyle = '#ffb13d'; g.fillRect((p - v0) / px - 1, 0, 2, H); } }
   $('ed-bpm').textContent = ED.bpm.toFixed(2);
   const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
-  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (sortie des 2 × 32 temps après B2, ou coupure F)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
+  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (64 temps après B2, 32 si trop près de la fin)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
 }
 // Vérifier un son AVANT de le mixer : il est analysé (sans platine) puis ouvert dans l'éditeur
 async function checkItem(t, rest){
@@ -3390,6 +3398,13 @@ function downbeat(t){
     if (at0 != null && Math.abs(r) >= 0.3 * T && err(fb + r) < 0.5 * err(fb)){ shift = r; fb += r; q = Math.round(r / T * 4); } }
   // K = le temps de la grille au départ du son
   let k = fb + Math.round((t0 - fb) / T) * T;
+  // Règle : K1 au TOUT début du son. Le son démarre sur une attaque nette ? La grille est posée pile dessus,
+  // dès que les kicks mesurés restent calés comme ça (tolérance : erreur médiane ≤ 2× celle d'avant + 10 ms).
+  if (at0 != null && Math.abs(k - t0) > 0.003){
+    const ks = t.fitInfo && t.fitInfo.kicks;
+    const e3 = f => { if (!ks) return 0; const r2 = []; for (const x of ks){ if (x < t0 - 0.05 || x > t0 + 64 * T) continue; const w = (x - f) / T; r2.push(Math.abs(w - Math.round(w)) * T); } if (r2.length < 8) return 0; r2.sort((p, q) => p - q); return r2[Math.floor(r2.length / 2)]; };
+    if (e3(t0) <= 2 * e3(fb) + 0.010){ shift += t0 - k; fb = t0; k = t0; }
+  }
   if (Math.abs(k - t0) > 0.35 * T){
     // Le son démarre entre deux temps de la grille. Si le début du son est une attaque nette et que les kicks
     // acceptent une grille posée sur ce début, K = pile le début de la wave (règle : K toujours au début du son).

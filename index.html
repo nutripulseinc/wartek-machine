@@ -952,7 +952,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 81</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 82</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1174,9 +1174,20 @@ function tempoFix(t){
       if (m && s / m > best){ best = s / m; bph = ph; } }
     return {c, s: best, ph: a + bph}; };
   const b0 = t.bpm, cand = [b0, b0 * 1.5, b0 / 1.5, b0 * 2, b0 / 2].filter(c => c >= 70 && c <= 230).map(score);
+  // Découpage du temps : en techno / hitech / psy, un temps se découpe en 2 ou en 4, jamais en 3.
+  // Si le tempo lu se découpe en 3 (kick + basse + basse à intervalles égaux), c'est qu'on a lu 2 vrais temps pour 3 : ×1,5.
+  const i0 = Math.floor(a * RES), i1 = Math.floor(b * RES);
+  let e0 = 0; for (let i = i0; i < i1; i++) e0 += on[i] * on[i];
+  const ac = L => { let best = 0; for (let d = -2; d <= 2; d++){ const l = Math.round(L * RES) + d; if (l < 2) continue; let s = 0; for (let i = i0; i < i1 - l; i++) s += on[i] * on[i + l]; best = Math.max(best, s / (e0 || 1)); } return best; };
+  const T0 = 60 / b0, r2 = ac(T0 / 2), r3 = ac(T0 / 3), r4 = ac(T0 / 4);
+  t._tfDbg = cand.map(x => x.c.toFixed(1) + ':' + x.s.toFixed(4)).join(' ') + ` | /2 ${r2.toFixed(3)} /3 ${r3.toFixed(3)} /4 ${r4.toFixed(3)}`;
   const cur = cand[0]; let win = cur;
-  for (const x of cand) if (x.s > win.s) win = x;
-  if (win !== cur && win.s < 1.25 * cur.s) win = cur;              // il faut une nette différence pour changer
+  const up = cand.find(x => Math.abs(x.c - b0 * 1.5) < 0.01);
+  if (up && r3 > 1.15 * Math.max(r2, r4) && up.s >= 0.8 * cur.s) win = up;   // temps découpé en 3 → vrai tempo ×1,5
+  else {
+    for (const x of cand) if (x.s > win.s) win = x;
+    if (win !== cur && win.s < 1.12 * cur.s) win = cur;              // il faut une nette différence pour changer
+  }
   const dbl = cand.find(x => Math.abs(x.c - win.c * 2) < 0.01);    // tous les temps du double ont aussi un kick : c'est le double
   if (dbl && dbl.s >= 0.85 * win.s) win = dbl;
   if (win === cur) return null;
@@ -3143,9 +3154,14 @@ function drawOver(d){
     const ph32 = 32 * d.beatLen, p0 = st.phrase0 ?? d.firstBeat;
     for (let t = p0 - Math.floor((p0 - d.firstBeat) / ph32) * ph32; t < d.duration; t += ph32) o.fillRect(Math.round(t / d.duration * W), 0, Math.max(1, u), H * 0.18);
     o.font = `${Math.round(H * 0.16)}px ${LCD_FONT}`; o.textBaseline = 'top';
-    [[d.firstBeat, '#20e6e8', 'K'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'F'], [cutMarkOf(d.item), '#ffb13d', 'C']].filter(x => x[0] != null).forEach(([t, col, lb]) => {
-      const x = Math.round(t / d.duration * W); o.fillStyle = col; o.fillRect(x, 0, 2 * u, H);
-      o.fillRect(x, H * 0.2, H * 0.08 * (lb.length + 1), H * 0.18); o.fillStyle = '#031216'; o.fillText(lb, x + H * 0.03, H * 0.21);
+    [[d.firstBeat, '#20e6e8', 'K'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'F'], [cutMarkOf(d.item), '#ffb13d', 'C']].filter(x => x[0] != null).forEach(([t, col, lb], _, arr) => {
+      // étiquettes qui se touchent (ex. K et B1 au même endroit) : on les décale vers le bas pour toutes les voir
+      const x = Math.round(t / d.duration * W), w = H * 0.08 * (lb.length + 1);
+      d._lbl = d._lbl || []; if (lb === 'K') d._lbl = [];
+      let row = 0; while (d._lbl.some(q => q.row === row && x < q.x + q.w + 2 && q.x < x + w + 2)) row++;
+      d._lbl.push({x, w, row}); const y = H * (0.2 + row * 0.2);
+      o.fillStyle = col; o.fillRect(x, 0, 2 * u, H);
+      o.fillRect(x, y, w, H * 0.18); o.fillStyle = '#031216'; o.fillText(lb, x + H * 0.03, y + H * 0.01);
     });
     d.overImg = off; d.overDirty = false;
   }
@@ -3403,7 +3419,11 @@ function downbeat(t){
   if (at0 != null && Math.abs(k - t0) > 0.003){
     const ks = t.fitInfo && t.fitInfo.kicks;
     const e3 = f => { if (!ks) return 0; const r2 = []; for (const x of ks){ if (x < t0 - 0.05 || x > t0 + 64 * T) continue; const w = (x - f) / T; r2.push(Math.abs(w - Math.round(w)) * T); } if (r2.length < 8) return 0; r2.sort((p, q) => p - q); return r2[Math.floor(r2.length / 2)]; };
-    if (e3(t0) <= 2 * e3(fb) + 0.010){ shift += t0 - k; fb = t0; k = t0; }
+    // Le son démarre sur un KICK (attaque forte dans les graves) → K1 = ce tout début, toujours.
+    // Sinon (pad, voix, nappe sans graves avant le 1er kick) : seulement si les kicks restent calés.
+    const i0 = Math.floor(t0 * R); let loAt = 0; for (let i = i0; i < Math.min(n, i0 + 8); i++) loAt = Math.max(loAt, lo[i]);
+    const los = Array.from(lo).filter(x => x > 0).sort((p, q) => p - q), loRef = los[Math.floor(los.length * 0.9)] || 1;
+    if (loAt >= 0.4 * loRef || e3(t0) <= 2 * e3(fb) + 0.010){ shift += t0 - k; fb = t0; k = t0; }
   }
   if (Math.abs(k - t0) > 0.35 * T){
     // Le son démarre entre deux temps de la grille. Si le début du son est une attaque nette et que les kicks
@@ -3535,6 +3555,7 @@ function setLite(on){
   try { localStorage.setItem('wartek-lite', LITE ? '1' : '0'); } catch(e){}
 }
 $('lite').addEventListener('click', () => setLite(!LITE));
+if ($('appver').textContent.includes('__' + 'VER__')) $('appver').textContent = 'WARTEK MACHINE · aperçu';
 try { setLite(localStorage.getItem('wartek-lite') === '1'); } catch(e){ setLite(false); }
 // on prépare l'oreille du mix (AudioWorklet) dès le démarrage, pour qu'elle soit prête au premier mix
 try { earLoad(); } catch(e){}

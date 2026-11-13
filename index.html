@@ -266,6 +266,7 @@ button{cursor:pointer}
 .edgrp button{height:44px;min-width:52px;padding:0 12px;border-radius:6px;border:1px solid #2e3a3c;background:#141a1c;color:#e9fbfc;font:600 16px var(--font-ui,inherit);touch-action:manipulation}
 .edgrp button:active{background:#22302f}
 .edgrp button.sel{outline:2px solid #fff;outline-offset:1px}
+.edgrp button.edloop.on{background:#ffb13d;color:#111;border-color:#ffb13d}
 .edgrp b{font-family:var(--font-lcd);font-size:26px;color:#3dffb0;min-width:110px;text-align:center}
 .edlbl{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
 .edinfo{font-family:var(--font-lcd);font-size:15px;color:#cfe3e5;flex:1;min-width:0}
@@ -276,6 +277,7 @@ button{cursor:pointer}
 .qplist .qe{border:1px solid var(--mute);background:none;color:var(--fg,#e9fbfc);border-radius:8px;height:34px;font-size:15px;padding:0 8px;white-space:nowrap}
 .qplist .ok{color:var(--go,#3dffb0);font-weight:700}
 .qlist .qok{color:var(--go,#3dffb0);margin-left:4px}
+.qwarn{color:#ffb13d;font-weight:700;margin-left:4px;font-size:.85em}
 .qplist li{grid-template-columns:40px 1fr 100px 96px;cursor:pointer;user-select:none;-webkit-user-select:none}
 .qplist .ck{width:30px;height:30px;border-radius:6px;border:2px solid var(--mute);display:grid;place-items:center;font-family:var(--font-lcd);font-size:15px;font-weight:700;color:#031216}
 .qplist li[aria-checked="true"] .ck{background:var(--qc,#20e6e8);border-color:var(--qc,#20e6e8);box-shadow:0 0 10px var(--qc,#20e6e8)}
@@ -922,7 +924,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
           <span id="ed-info" class="edinfo"></span>
         </div>
         <div class="edbar">
-          <div class="edgrp"><span class="edlbl">Aller au repère</span><button data-go="kick" class="mk-k">K</button><button data-go="bass" class="mk-b1">B1</button><button data-go="bass2" class="mk-b2">B2</button><button data-go="cut" class="mk-c">C</button><button data-go="out" class="mk-f">F</button></div>
+          <div class="edgrp"><span class="edlbl">Aller au repère</span><button data-go="kick" class="mk-k">K</button><button data-go="bass" class="mk-b1">B1</button><button data-go="bass2" class="mk-b2">B2</button><button data-go="cut" class="mk-c">C</button><button data-go="out" class="mk-f">F</button><button data-lp="1" class="edloop">⟲ 1 mes</button><button data-lp="2" class="edloop">⟲ 2</button><button data-lp="4" class="edloop">⟲ 4</button></div>
           <div class="edgrp"><span class="edlbl" id="ed-sel">Affiner —</span><button data-mb="-1">◀ 1 temps</button><button data-mn="-0.01">◀◀ 10 ms</button><button data-mn="-0.001">◀ 1 ms</button><button data-mn="0.001">1 ms ▶</button><button data-mn="0.01">10 ms ▶▶</button><button data-mb="1">1 temps ▶</button></div>
         </div>
       </div>
@@ -957,7 +959,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 87</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 88</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1340,12 +1342,14 @@ function barRms(t){
 function structureOf(t){
   if (t.struct) return t.struct;
   const e = barEnergy(t), r = barRms(t), nb = e.length, bar = 240 / t.bpm, m = t.markers || {};
-  const sorted = [...e].sort((a, b) => a - b), ref = sorted[Math.floor(nb * 0.75)] || 0, flo0 = sorted[Math.floor(nb * 0.1)] || 0, flo = ref - flo0 > 0.25 * ref ? flo0 : 0, thr = flo + 0.4 * (ref - flo);   // au-dessus de la traîne des kicks seuls
+  const sorted = [...e].sort((a, b) => a - b), ref = sorted[Math.floor(nb * 0.75)] || 0, flo0 = sorted[Math.floor(nb * 0.1)] || 0, flo = ref - flo0 > 0.25 * ref ? flo0 : 0, thr = flo + (0.4 + LEARN.k) * (ref - flo);   // au-dessus de la traîne des kicks seuls
   // Graves sur toute la mesure (comme la couleur de la wave sur la platine) : la vraie ligne de basse les remplit,
   // une intro avec seulement des kicks (même à longue queue) non. B1 doit avoir les DEUX.
   const Lb = (() => { const lo = t.peaks.lo, out = []; for (let b = 0; b < nb; b++){ const s0 = Math.floor((t.firstBeat + b * bar) * RES), s1 = Math.floor((t.firstBeat + (b + 1) * bar) * RES); let a = 0, c = 0; for (let i = Math.max(0, s0); i < s1 && i < lo.length; i++){ a += lo[i]; c++; } out.push(c ? a / c : 0); } return out; })();
-  const Ls = [...Lb].sort((a, b) => a - b), Lref = Ls[Math.floor(nb * 0.75)] || 0, Lflo = Ls[Math.floor(nb * 0.1)] || 0, Lthr = Lflo + 0.55 * (Lref - Lflo);
-  const isBass = i => i >= 0 && i < nb && e[i] >= thr && Lb[i] >= Lthr;
+  const Ls = [...Lb].sort((a, b) => a - b), Lref = Ls[Math.floor(nb * 0.75)] || 0, Lflo = Ls[Math.floor(nb * 0.1)] || 0, Lthr = Lflo + (0.55 + LEARN.k) * (Lref - Lflo);
+  // Vraie basse = note grave qui TIENT entre les kicks. Une queue de kick retombe : le rapport graves-entre-kicks / force du kick reste bas.
+  const kk = barKick(t), ratio = e.map((v, i) => v / Math.max(1e-6, kk[i] || 0)), rqs = [...ratio].sort((a, b) => a - b), rq = rqs[Math.floor(nb * 0.75)] || 1;
+  const isBass = i => i >= 0 && i < nb && e[i] >= thr && Lb[i] >= Lthr && ratio[i] >= 0.45 * rq;
   let bi = e.findIndex((v, i) => isBass(i) && isBass(i + 1)); if (bi < 0) bi = e.findIndex((v, i) => v >= thr && (e[i + 1] ?? v) >= thr); if (bi < 0) bi = 0;
   let bo = nb; for (let i = nb - 1; i > bi; i--) if (e[i] >= thr && (e[i - 1] ?? e[i]) >= thr){ bo = i + 1; break; }
   const mx = a => Math.max(1e-9, ...a), em = mx(e), rm = mx(r), x = e.map((v, i) => v / em + r[i] / rm);
@@ -1434,6 +1438,14 @@ function structureOf(t){
   const bl = bar / 4, exact = new Set(m.exact || []);
   const onBeat = (x, k) => exact.has(k) ? x : t.firstBeat + Math.round((x - t.firstBeat) / bl) * bl;   // posé en mode libre : exact
   t._dbgBars = {graves_entre_kicks: e.slice(0, 48).map(v => Math.round(100 * v / (ref || 1))).join(' '), graves_mesure: Lb.slice(0, 48).map(v => Math.round(100 * v / (Lref || 1))).join(' '), seuils: [Math.round(100 * thr / (ref || 1)), Math.round(100 * Lthr / (Lref || 1))]};
+  // Confiance de chaque repère : saut d'énergie net, ligne de basse qui tient, repère sur la phrase (multiple de 4 mesures depuis K)
+  { const S = b => { if (b == null || b < 1) return 0; let a = 0, c = 0; for (let j = 0; j < 4; j++){ a += x[b + j] ?? 0; c += x[b - 4 + j] ?? x[0]; } return (a - c) / 4; };
+    let maxS = 1e-6; for (let b = 1; b < nb - 4; b++) maxS = Math.max(maxS, S(b));
+    const hold = b => { let k = 0; for (let j = b; j < Math.min(nb, b + 12); j++) if (isBass(j)) k++; return k / Math.max(1, Math.min(12, nb - b)); };
+    const cf = b => { if (b == null) return 0; const jump = b === 0 ? 0.8 : clamp(S(b) / (0.5 * maxS), 0, 1); return +(jump * (hold(b) >= 0.75 ? 1 : 0.7) * (b % 4 === 0 ? 1 : 0.75)).toFixed(2); };
+    const fit = t.fitInfo || {}, tc = (fit.rms && fit.rms * 1000 > 6) ? 0.4 : 1;
+    t.conf = {B1: m.bass != null ? 1 : cf(bi), B2: m.bass2 != null ? 1 : cf(b2), BPM: m.bpm ? 1 : tc};
+    t.doubt = Object.keys(t.conf).filter(k => t.conf[k] < 0.55 && !(k === 'B2' && b2 == null)); }
   t.struct = {drop: m.bass != null ? onBeat(m.bass, 'bass') : t.firstBeat + bi * bar, outro: m.out != null ? onBeat(m.out, 'out') : t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph,
               lastBass: b2 == null ? null : (m.bass2 != null ? onBeat(m.bass2, 'bass2') : t.firstBeat + b2 * bar), lastBar: b2};
   return t.struct;
@@ -2112,6 +2124,14 @@ function fxAt(d, v, t, tc = 0.05){
   if (d.trOsc){ try { d.trOsc.stop(t); } catch(e){} d.trOsc = null; d.trKey = ''; } d.trans.gain.cancelScheduledValues(t); set(d.trans, 1);
   set(d.dry, nm === 'flanger' ? 1 - 0.4 * a : nm === 'crush' ? 1 - 0.85 * a : 1);
   if (nm === 'flanger'){ d.flL.o.frequency.setTargetAtTime(0.18, t, 0.1); d.flFb.gain.setTargetAtTime(0.75, t, 0.1); }
+  if (nm === 'phaser'){ set(d.phWet, a * 0.9); d.phL.o.frequency.setTargetAtTime(v.rate ?? 0.6, t, 0.05); d.phFb.gain.setTargetAtTime(0.55, t, 0.05); }
+  if (nm === 'filter'){ set(d.afWet, a); d.afL.o.frequency.setTargetAtTime(v.rate ?? 1.2, t, 0.05); d.afF.Q.setValueAtTime(6, t); }
+  if (nm === 'roll'){   // beat repeat : on capte une tranche (div temps) puis on la répète, le son direct se tait
+    const dt = (v.div ?? 0.25) * 60 / (d.bpm * d.rate);
+    d.rlD.delayTime.setValueAtTime(dt, t); d.rlIn.gain.cancelScheduledValues(t); d.rlIn.gain.setValueAtTime(1, t); d.rlIn.gain.setValueAtTime(0, t + dt);
+    d.rlFb.gain.cancelScheduledValues(t); d.rlFb.gain.setValueAtTime(1, t); d.rlWet.gain.cancelScheduledValues(t); d.rlWet.gain.setValueAtTime(1, t); d.rollOn = true;
+    d.dry.gain.cancelScheduledValues(t); d.dry.gain.setValueAtTime(1, t); d.dry.gain.setValueAtTime(0, t + dt);
+  }
   if (nm === 'echo'){ d.ecFb.gain.setTargetAtTime(v.fb ?? 0.6, t, 0.02); d.ecD.delayTime.setTargetAtTime((v.rate ?? 0.75) * 60 / (d.bpm * d.rate), t, 0.01); }
   if (nm === 'reverb'){
     if (!d.rvOn){ d.makeIR(3.5); d.post.connect(d.conv); d.rvOn = true; }
@@ -2171,6 +2191,17 @@ function fillStart(t, t0, beat){
   const r = ref[Math.floor(ref.length / 2)] || 0; if (r <= 0) return null;
   let qs = null; for (let q = 31; q >= 28; q--){ if (beatLvl(t, t0 + q * beat, beat) < 0.65 * r) qs = q; else break; }
   return qs;
+}
+// Apprentissage : à chaque B1 corrigé dans l'éditeur, l'appli ajuste son seuil « vraie basse » à TA musique
+const LEARN = (() => { try { return JSON.parse(localStorage.getItem('wartek-learn')) || {k: 0, n: 0}; } catch(e){ return {k: 0, n: 0}; } })();
+function learnSave(){ try { localStorage.setItem('wartek-learn', JSON.stringify(LEARN)); } catch(e){} }
+// Lecture « au microscope » : pour chaque mesure, la force du KICK (attaque dans les graves au début du temps)
+function barKick(t){
+  const beat = 60 / t.bpm, nb = Math.floor((t.buffer.duration - t.firstBeat) / (4 * beat)), lo = t.peaks.lo, k = [];
+  for (let b = 0; b < nb; b++){ let acc = 0;
+    for (let q = 0; q < 4; q++){ const t0 = t.firstBeat + (b * 4 + q) * beat, s0 = Math.floor((t0 - 0.03) * RES), s1 = Math.floor((t0 + 0.15 * beat) * RES); let m = 0; for (let i = Math.max(0, s0); i < s1 && i < lo.length; i++) if (lo[i] > m) m = lo[i]; acc += m; }
+    k.push(acc / 4); }
+  return k;
 }
 function barEnergy(t){
   if (t.barE) return t.barE;
@@ -2412,6 +2443,15 @@ function startTransition(dt){
     }
     if (tBreak != null){ schedule(o, 'vol', 0, tBreak, 0.008); plan.tFade = tBreak; plan.tEnd = tBreak + 0.3;
       plan.sortie = `Break de ${n.id} : ${o.id} coupé net ${Math.round((tBreak - tDrop) / beat)} temps après le swap`; }
+    else if (plan.synced && Math.random() < 0.7){
+      // Sortie en écho : le son se tait sur le temps et son dernier coup part en écho calé (3/4 de temps) qui s'éteint tout seul
+      plan.echoOut = true;
+      schedule(o, 'fx', {name: 'echo', amt: 0.75, rate: 0.75, fb: 0.55}, tF - 0.5 * beat, 0.02);
+      schedule(o, 'input', 0, tF + beat, 0.01);
+      for (let i = 1; i <= 6; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / 6, 1.2)), tF + beat + i * beat, 0.2);
+      plan.tFade = tCut; plan.tEnd = tF + 8 * beat + 0.3;
+      plan.sortie = `C→F : ${tailB} temps, ${steps} palier(s) de 16 temps, sortie en écho à F`;
+    }
     else {
       const fb = 4;
       for (let i = 1; i <= fb; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / fb, 1.3)), tF + (i - 1) * beat, 0.12);
@@ -2423,13 +2463,24 @@ function startTransition(dt){
   // B coupé au fader, A seul (basses remises, CFX à zéro, petit phaser pour habiller),
   // puis pile sur le 1er temps après la coupure : B revient, basses de A recoupées, CFX et effet comme avant.
   const txt = [];
+  // Comme un humain : chaque mix tire au sort ses gestes (jamais deux fois exactement pareil)
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  const FXT = [{name: 'phaser', amt: 0.55}, {name: 'flanger', amt: 0.5}, {name: 'echo', amt: 0.5, rate: 0.5, fb: 0.45}, {name: 'filter', amt: 0.6, rate: 1.5}];
+  for (const tk of plan.trick || []){ tk.fx = pick(FXT); }
   for (const tk of plan.trick || []){
     const tq = tDrop + tk.q * beat, t32 = tDrop + tk.end * beat, fHold = Math.round(cfx * (cfx > 0 ? 45 : 40));
     schedule(n, 'vol', 0, tq, 0.012); schedule(n, 'vol', 100, t32, 0.006);
-    schedule(o, 'lo', 0, tq, 0.012); schedule(o, 'filt', 0, tq, 0.02); schedule(o, 'fx', {name: 'phaser', amt: 0.55}, tq, 0.04);
-    schedule(o, 'lo', -26, t32, 0.004); schedule(o, 'filt', fHold, t32, 0.02); schedule(o, 'fx', {name: 'phaser', amt: 0}, t32, 0.03);
-    txt.push(`fin des ${tk.end} : ${o.id} seul ${tk.end - tk.q} temps (coupure vue sur ${tk.from})`);
+    schedule(o, 'lo', 0, tq, 0.012); schedule(o, 'filt', 0, tq, 0.02); schedule(o, 'fx', tk.fx, tq, 0.04);
+    schedule(o, 'lo', -26, t32, 0.004); schedule(o, 'filt', fHold, t32, 0.02); schedule(o, 'fx', {name: 'none'}, t32, 0.03);
+    txt.push(`fin des ${tk.end} : ${o.id} seul ${tk.end - tk.q} temps + ${tk.fx.name} (coupure vue sur ${tk.from})`);
   }
+  // Roll avant le drop : sur le dernier temps avant le swap, le son qui sort répète sa dernière croche (6 mix sur 10)
+  if (plan.synced && plan.useB2 && Math.random() < 0.6){
+    const div = pick([0.25, 0.5]);
+    schedule(o, 'fx', {name: 'roll', amt: 1, div}, tDrop - beat, 0.01); schedule(o, 'fx', {name: 'none'}, tDrop, 0.005);
+    txt.push(`roll 1/${Math.round(1 / div)} temps avant le drop`);
+  }
+  if (plan.echoOut) txt.push('sortie en écho');
   if (txt.length) plan.trickTxt = txt.join(' · ');
   plan.events.sort((a, b) => a.t - b.t);
   plan.scheduled = true;
@@ -2447,7 +2498,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
   let e = []; try { e = barEnergy(t); } catch(_){}
   const mx = Math.max(1e-9, ...e), around = b => b == null ? null : e.slice(Math.max(0, b - 4), b + 4).map(v => Math.round(100 * v / mx)).join(' ');
   return {nom: t.name, bpm: t.bpm, mesure: t.dbInfo || null, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar,
-    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
+    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
     grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
@@ -2594,6 +2645,7 @@ function openEditorItem(t, d, cur){
   const st = structureOf(t);
   ED.d = d; ED.t = t; ED.bpm = t.bpm; ED.fb = t.firstBeat;
   ED.m = {kick: t.start ?? t.firstBeat, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: t.markers && t.markers.cut != null ? t.markers.cut : null};
+  ED.autoB1 = (t.markers && t.markers.bass != null) ? null : st.drop;
   edSelect(null); ED.reset = false; ED.touched = new Set(); ED.exact = new Set((t.markers && t.markers.exact) || []); $('ed-free').setAttribute('aria-pressed', 'false');   // à l'ouverture : curseur sur les repères de la grille
   ED.cur = cur ?? t.firstBeat; ED.span = 4 * 4 * 60 / t.bpm; ED.view = Math.max(0, ED.cur - ED.span / 3);
   $('ed-title').textContent = `Éditeur · ${t.name}`;
@@ -2641,7 +2693,8 @@ function edDraw(){
       g.fillStyle = ED_COL[k]; g.fillRect(x - 2, 0, 4, H); g.font = 'bold 28px monospace'; g.fillText(ED_LBL[k], x + 6, 32); }
     if (cAuto != null && cAuto >= v0 && cAuto <= v0 + sp){ const x = (cAuto - v0) / px; g.globalAlpha = 0.6; g.fillStyle = ED_COL.cut; for (let y = 0; y < H; y += 14) g.fillRect(x - 2, y, 4, 8); g.font = 'bold 28px monospace'; g.fillText('C auto', x + 6, 32); g.globalAlpha = 1; }
     g.fillStyle = '#fff'; g.fillRect((ED.cur - v0) / px - 1.5, 0, 3, H);
-    if (ED.src){ const p = ED.srcOff + (ctx.currentTime - ED.srcT0); g.fillStyle = '#ffb13d'; g.fillRect((p - v0) / px - 1, 0, 2, H); } }
+    if (ED.loopAB){ const L = ED.loopAB; g.fillStyle = 'rgba(255,177,61,0.12)'; g.fillRect((L.a - v0) / px, 0, (L.b - L.a) / px, H); }
+    if (ED.src){ const p = edPosNow(); g.fillStyle = '#ffb13d'; g.fillRect((p - v0) / px - 1, 0, 2, H); } }
   $('ed-bpm').textContent = ED.bpm.toFixed(2);
   const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
   $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (64 temps après B2, 32 si trop près de la fin)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
@@ -2652,9 +2705,51 @@ async function checkItem(t, rest){
   if (!t.bpm || !t.buffer) toast(`Analyse de « ${t.name} »…`, 1500);
   try { await prepItem(t); } catch(e){ toast(`« ${t.name} » n'a pas pu être lu.`); if (rest && rest.length) checkItem(rest.shift(), rest); return; }
   ED.list = rest || null; openEditorItem(t, Object.values(decks).find(x => x.item === t) || null, null);
+  const dk = (t.doubt || []).find(k => k === 'B1' || k === 'B2');
+  if (dk && !isChecked(t)){ const b = document.querySelector(`[data-go="${dk === 'B1' ? 'bass' : 'bass2'}"]`); if (b) b.click(); toast(`⚠ ${dk} pas sûr sur ce son : écoute-le en boucle (⟲) et ajuste.`, 3500); }
+  else if ((t.doubt || []).includes('BPM')) toast('⚠ BPM pas sûr sur ce son : vérifie que la grille reste sur les kicks jusqu\'à la fin.', 3500);
 }
+// Analyse en tâche de fond des sons en file d'attente (un à la fois, seulement hors transition) → les ⚠ apparaissent tout seuls
+setInterval(async () => {
+  if (plan || prepItem.busy) return;
+  const t = Object.values(decks).flatMap(d => d.queue).find(x => x && !x.bpm && x.file);
+  if (!t) return; prepItem.busy = true;
+  try { await prepItem(t); } catch(e){}
+  prepItem.busy = false; Object.values(decks).forEach(renderQueue); if (!$('qpick').hidden) renderQPick();
+}, 4000);
 function isChecked(t){ return !!(t && t.markers && t.markers.ok); }
-function edStop(){ if (ED.src){ try { ED.src.stop(); } catch(e){} ED.src = null; } cancelAnimationFrame(ED.raf); $('ed-play').classList.remove('on'); $('ed-play').textContent = '▶ Écouter'; edDraw(); }
+function isDoubt(t){ return !isChecked(t) && !!(t && t.doubt && t.doubt.length); }
+const doubtTxt = t => isDoubt(t) ? ` <span class="qwarn" title="À vérifier : ${t.doubt.join(', ')} incertain">⚠ ${t.doubt.join(' ')}</span>` : '';
+function edStop(){ if (ED.src){ try { ED.src.stop(); } catch(e){} ED.src = null; } ED.loopAB = null; document.querySelectorAll('[data-lp]').forEach(b => b.classList.remove('on')); cancelAnimationFrame(ED.raf); $('ed-play').classList.remove('on'); $('ed-play').textContent = '▶ Écouter'; edDraw(); }
+function edPosNow(){ const L = ED.loopAB; if (L){ const len = L.b - L.a; return L.a + (((ctx.currentTime - L.t0) % len) + len) % len; } return ED.srcOff + (ctx.currentTime - ED.srcT0); }
+// Boucle A→B autour du repère choisi (ou du curseur) : on fabrique la boucle avec le clic de la grille
+// et un BIP aigu pile sur le repère → on entend tout de suite si le repère tombe sur la basse / le kick.
+function edLoopRender(L){
+  const buf = ED.t.buffer, sr = buf.sampleRate, n = Math.max(1, Math.round((L.b - L.a) * sr)), ch = buf.numberOfChannels, out = ctx.createBuffer(ch, n, sr), s0 = Math.round(L.a * sr);
+  for (let c = 0; c < ch; c++){ const src = buf.getChannelData(c), dst = out.getChannelData(c); for (let i = 0; i < n; i++){ const j = s0 + i; dst[i] = j >= 0 && j < src.length ? src[j] : 0; } }
+  const blip = (tm, f, amp, dur) => { const i0 = Math.round((tm - L.a) * sr), m = Math.round(dur * sr); for (let c = 0; c < ch; c++){ const dst = out.getChannelData(c); for (let i = 0; i < m && i0 + i < n; i++){ if (i0 + i < 0) continue; dst[i0 + i] += amp * Math.sin(2 * Math.PI * f * i / sr) * Math.exp(-i / (m * 0.3)); } } };
+  if ($('ed-click').getAttribute('aria-pressed') === 'true'){ const T = edT(); for (let k = Math.ceil((L.a - ED.fb) / T); ED.fb + k * T < L.b; k++) blip(ED.fb + k * T, k % 4 === 0 ? 2000 : 1300, 0.25, 0.02); }
+  const mk = ED.sel && ED.m[ED.sel] != null ? ED.m[ED.sel] : null; if (mk != null && mk >= L.a && mk < L.b) blip(mk, 3200, 0.45, 0.05);
+  return out;
+}
+function edLoop(bars){
+  const live = Object.values(decks).some(d => d.playing);
+  if (live && route === 'normal'){ toast('Un son joue sur l\'enceinte : passe la sortie casque en « Câble séparateur » ou « Casque seul » pour écouter ici sans que le public l\'entende.'); return; }
+  const was = ED.loopAB && ED.loopAB.bars === bars; edStop(); if (was) return;
+  const bar = 240 / ED.bpm, c = ED.sel && ED.m[ED.sel] != null ? ED.m[ED.sel] : ED.cur;
+  const a = c - Math.min(1, bars / 2) * bar, L = {a, b: a + bars * bar, bars};
+  edLoopStart(L, 0); document.querySelectorAll('[data-lp]').forEach(b => b.classList.toggle('on', +b.dataset.lp === bars));
+  ED.view = L.a - 0.1 * (L.b - L.a); ED.span = Math.max(ED.span < (L.b - L.a) * 1.2 ? (L.b - L.a) * 1.2 : ED.span, 0.3); edDraw();
+}
+function edLoopStart(L, phase){
+  const live = Object.values(decks).some(d => d.playing), s = ctx.createBufferSource(); s.buffer = edLoopRender(L); s.loop = true; s.connect(live ? cueBus : masterBus);
+  const when = ctx.currentTime + 0.03; s.start(when, phase); ED.src = s; L.t0 = when - phase; ED.loopAB = L;
+  $('ed-play').classList.add('on'); $('ed-play').textContent = '■ Stop';
+  cancelAnimationFrame(ED.raf); const tick = () => { if (!ED.src || !ED.loopAB) return; if ($('editor').hidden){ edStop(); return; } edDraw(); ED.raf = requestAnimationFrame(tick); }; ED.raf = requestAnimationFrame(tick);
+}
+// repère affiné pendant la boucle → on refait la boucle sans perdre la position (on entend le changement tout de suite)
+function edLoopRefresh(){ const L = ED.loopAB; if (!L || !ED.src) return; const len = L.b - L.a, ph = (((ctx.currentTime - L.t0) % len) + len) % len; try { ED.src.stop(); } catch(e){} edLoopStart(L, ph); }
+document.querySelectorAll('[data-lp]').forEach(b => b.addEventListener('click', () => edLoop(+b.dataset.lp)));
 function edPlay(){
   if (ED.src){ edStop(); return; }
   const live = Object.values(decks).some(d => d.playing);
@@ -2718,7 +2813,7 @@ document.querySelectorAll('[data-mn],[data-mb]').forEach(b => b.addEventListener
   const k = ED.sel; if (!k || ED.m[k] == null){ toast('Choisis d\'abord un repère avec « Aller au repère ».', 2200); return; }
   const d = b.dataset.mn != null ? parseFloat(b.dataset.mn) : parseFloat(b.dataset.mb) * edT();
   ED.m[k] = Math.max(0, ED.m[k] + d); ED.touched.add(k); (ED.exact = ED.exact || new Set()).add(k);
-  ED.cur = ED.m[k]; if (ED.cur < ED.view || ED.cur > ED.view + ED.span) ED.view = ED.cur - ED.span / 2; edDraw();
+  ED.cur = ED.m[k]; if (ED.cur < ED.view || ED.cur > ED.view + ED.span) ED.view = ED.cur - ED.span / 2; edLoopRefresh(); edDraw();
 }));
 $('ed-zin').addEventListener('click', () => { if (ED.span > 0.05){ const c = ED.cur; ED.span /= 2; ED.view = c - ED.span / 3; edDraw(); } });
 $('ed-zout').addEventListener('click', () => { if (ED.span < 200){ const c = ED.cur; ED.span *= 2; ED.view = Math.max(-ED.span / 2, c - ED.span / 3); edDraw(); } });
@@ -2757,6 +2852,8 @@ $('ed-save').addEventListener('click', () => {
   for (const k of ['bass', 'bass2', 'out']) if ((ED.touched.has(k) || old[k] != null) && ED.m[k] != null) nm[k] = ED.m[k];
   if (ED.m.cut != null) nm.cut = ED.m.cut;
   nm.ok = true;   // son vérifié à la main
+  if (ED.autoB1 != null && nm.bass != null){ const dB = (nm.bass - ED.autoB1) / (240 / ED.bpm);
+    if (Math.abs(dB) >= 2){ LEARN.k = clamp(LEARN.k + (dB > 0 ? 0.02 : -0.02), -0.12, 0.15); LEARN.n++; learnSave(); } }
   t.markers = nm; if (!gridMan){ t.manualGrid = false; }
   t.struct = null; t.barE = null; t.barR = null; structureOf(t);
   for (const x of Object.values(decks)) if (x.item === t){ x.bpm = t.bpm; x.firstBeat = t.firstBeat; x.overDirty = true; }
@@ -2897,7 +2994,7 @@ function onTrackEnd(d){
 function renderQueue(d){
   const ul = $(`${d.id}-qlist`); if (!ul) return;
   d.queue = d.queue.filter(t => lib.includes(t));
-  ul.innerHTML = d.queue.length ? d.queue.map((t, i) => `<li><span class="qn">${i + 1}</span><span class="qt" data-qd="${d.id}" data-qi="${i}" title="Charger maintenant">${esc(t.name)}${isChecked(t) ? '<span class="qok">✓</span>' : ''}</span><button data-qx="${d.id}" data-qi="${i}" aria-label="Retirer de la file">×</button></li>`).join('')
+  ul.innerHTML = d.queue.length ? d.queue.map((t, i) => `<li><span class="qn">${i + 1}</span><span class="qt" data-qd="${d.id}" data-qi="${i}" title="Charger maintenant">${esc(t.name)}${isChecked(t) ? '<span class="qok">✓</span>' : ''}${doubtTxt(t)}</span><button data-qx="${d.id}" data-qi="${i}" aria-label="Retirer de la file">×</button></li>`).join('')
     : `<li class="qempty">Ajoute les prochains sons : ils se chargeront ici, dans l'ordre.</li>`;
 }
 function saveQueues(){ idb('samples', 'readwrite', st => st.put({A: decks.A.queue.map(t => t.id).filter(Boolean), B: decks.B.queue.map(t => t.id).filter(Boolean)}, '__queues')).catch(() => {}); }
@@ -3034,7 +3131,7 @@ function renderQPick(){
   const d = qpDeck;
   $('qp-list').innerHTML = lib.map((t, i) => { const k = qpSel.indexOf(t);
     return `<li data-qp="${i}" role="checkbox" aria-checked="${k >= 0}" class="${d.queue.includes(t) || d.item === t ? 'inq' : ''}">
-      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${esc(t.name)}${isChecked(t) ? ' <span class="ok">✓</span>' : ''}</span><span class="m">${t.bpm ? t.bpm.toFixed(1) + ' BPM' : '— BPM'}</span><button class="qe" data-qe="${i}" aria-label="Vérifier ce son dans l'éditeur">✎ Vérifier</button></li>`; }).join('')
+      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${esc(t.name)}${isChecked(t) ? ' <span class="ok">✓</span>' : ''}${doubtTxt(t)}</span><span class="m">${t.bpm ? t.bpm.toFixed(1) + ' BPM' : '— BPM'}</span><button class="qe" data-qe="${i}" aria-label="Vérifier ce son dans l'éditeur">✎ Vérifier</button></li>`; }).join('')
     + '<li class="dnote">Touche les sons dans l\'ordre où tu veux les jouer (le numéro = l\'ordre), puis « Ajouter ». « Du téléphone » importe de nouveaux fichiers : sur le téléphone, appuie longuement sur un fichier pour en cocher plusieurs.<br>✎ Vérifier : ouvre le son dans l\'éditeur pour contrôler K, B1, B2, C, F avant le mix. « Vérifier » en haut : passe un à un les sons cochés (ou, sans coche, ceux de la file pas encore vérifiés). ✓ = son vérifié.</li>';
   const n = qpSel.length, ok = $('qp-ok');
   ok.disabled = !n; ok.textContent = n ? `Ajouter (${n})` : 'Ajouter';
@@ -3049,6 +3146,7 @@ $('qp-list').addEventListener('click', e => {
 });
 $('qp-check').addEventListener('click', () => {
   const d = qpDeck; let list = qpSel.length ? qpSel.slice() : d.queue.filter(t => !isChecked(t));
+  list.sort((x, y) => (isDoubt(y) ? 1 : 0) - (isDoubt(x) ? 1 : 0));   // les sons douteux ⚠ d'abord
   if (!list.length){ toast(qpSel.length ? '' : 'Tous les sons de la file sont déjà vérifiés ✓ (coche des sons pour les revoir).', 3000); return; }
   checkItem(list.shift(), list);
 });

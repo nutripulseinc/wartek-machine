@@ -959,7 +959,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 97</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 98</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2235,7 +2235,10 @@ function endOfMusic(t){
 //   pour que sa 1re basse tombe pile sur P (le « 1 » de la phrase)
 function makePlan(o, n){
   if (!o.buffer || !n.buffer || !o.bpm || !n.bpm) return null;
-  const so = structureOf(o.item), sn = structureOf(n.item);
+  const so = {...structureOf(o.item)}, sn = {...structureOf(n.item)};
+  // B2 (sortant) et B1 (entrant) lus au kick près, même méthode des deux côtés : B1 tombe pile sur B2
+  const snap = {}; { const a = kickSnap(o.item, so.lastBass), b = kickSnap(n.item, sn.drop);
+    if (a.d != null){ so.lastBass = a.t; snap.B2_sort_ms = Math.round(a.d * 1000); } if (b.d != null){ sn.drop = b.t; snap.B1_entre_ms = Math.round(b.d * 1000); } }
   let r = tempoRatio(o, n); const synced = Math.abs(r - 1) <= 0.16; if (!synced) r = 1;
   const ob = o.beatLen, nb = n.beatLen, pos = o.pos(), lead = 1.2 * o.rate;
   const E = endOfMusic(o.item);
@@ -2320,7 +2323,7 @@ function makePlan(o, n){
     const qB = fillStart(n.item, sn.drop + k * 32 * nb, nb), qA = fillStart(o.item, P + k * 32 * ob, ob), q = qB ?? qA;
     if (q != null) trick.push({q: q + k * 32, end, from: qB != null ? n.id : o.id});
   }
-  return {o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+  return {snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + stopBars * 4 + 8, trick, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
@@ -2368,7 +2371,9 @@ function startTransition(dt){
   // Priorité au moment des basses (B2 de A / B1 de B) : c'est là que l'oreille juge le calage.
   // Si les kicks de l'intro sont un peu décalés par rapport à ceux du drop (autre kick, montage), on cale sur le drop.
   { const o = plan.o, n = plan.n, bDrop = plan.bStart + plan.Lp * n.beatLen;
-    const aK = localShift(o.item, plan.oldStart), bK = localShift(n.item, plan.bStart), aD = localShift(o.item, plan.P), bD = localShift(n.item, bDrop);
+    // basses déjà calées au kick près (kickSnap) : on ne re-décale pas avec la grille
+    const sn = plan.snap && plan.snap.B2_sort_ms != null && plan.snap.B1_entre_ms != null;
+    const aK = sn ? null : localShift(o.item, plan.oldStart), bK = sn ? null : localShift(n.item, plan.bStart), aD = sn ? null : localShift(o.item, plan.P), bD = sn ? null : localShift(n.item, bDrop);
     const dA = aD ?? aK ?? 0, dB = bD ?? bK ?? 0;
     if (dA){ plan.oldStart += dA; plan.P += dA; plan.cut += dA; } if (dB) plan.bStart += dB;
     const ms = v => v == null ? null : Math.round(v * 1000);
@@ -2503,7 +2508,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
     basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, verrou_kicks: t.lockInfo || null, tempo_peigne: t.combInfo || null, nettete_tempo: t.combConf != null ? +t.combConf.toFixed(2) : null, grille_a_verifier: t.gridWarn || null, bpm_a_verifier: t.bpmWarn || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
-    grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
+    grille_locale: p.local || null, calage_basses_ms: p.snap || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
   if (DIAG.length > 6) DIAG.shift();
 }
 function finishTransition(){
@@ -2620,20 +2625,26 @@ function earCheck(plan, now){
   if (lag == null){ lockInfo = {t: now, txt: 'OREILLE ?'}; return; }
   // Tempo à l'oreille : si l'écart GLISSE avec le temps, c'est que les BPM ne sont pas exactement les mêmes
   // (ex. 156,153 noté au lieu de 156). Comme un DJ qui touche le pitch, on corrige la VITESSE du son qui entre.
-  { const H = plan.earHist = (plan.earHist || []).filter(h => now - h.t < 24); H.push({t: now, lag: lag - (plan.expIntro || 0)});
-    if (H.length >= 4 && H[H.length - 1].t - H[0].t >= 6 && now < (plan.tFade || Infinity)){
+  // (seulement les écoutes faites APRÈS le dernier recalage : sinon le saut du recalage ressemble à une dérive et la vitesse part en vrille)
+  // Tempos validés au peigne des deux côtés → pas de correction de vitesse : on sait que les BPM sont justes.
+  const bothSure = [o, n].every(d => d.item && d.item.combConf >= 1.3 && !d.item.bpmWarn);
+  { const H = plan.earHist = (plan.earHist || []).filter(h => now - h.t < 30 && h.t > (plan.earFixT || 0)); H.push({t: now, lag: lag - (plan.expIntro || 0)});
+    if (!bothSure && H.length >= 6 && H[H.length - 1].t - H[0].t >= 10 && now < (plan.tFade || Infinity)){
       const m = H.length, mt = H.reduce((a, h) => a + h.t, 0) / m, ml = H.reduce((a, h) => a + h.lag, 0) / m;
       let sxy = 0, sxx = 0; for (const h of H){ sxy += (h.t - mt) * (h.lag - ml); sxx += (h.t - mt) ** 2; }
       const sl = sxy / sxx, res = Math.sqrt(H.reduce((a, h) => a + (h.lag - (ml + sl * (h.t - mt))) ** 2, 0) / m);
-      if (Math.abs(sl) >= 0.0004 && res < 0.006 && Math.abs((plan.rateFix || 0) + sl) < 0.006){
+      if (Math.abs(sl) >= 0.0004 && res < 0.004 && Math.abs(sl * (H[H.length - 1].t - H[0].t)) > 0.008 && Math.abs((plan.rateFix || 0) + sl) < 0.003){
         plan.rateFix = (plan.rateFix || 0) + sl; n.setRate(n.rate * (1 + sl), now + 0.05); plan.earHist = [];
         lockInfo = {t: now, txt: `TEMPO ${n.id} ${sl > 0 ? '+' : ''}${(sl * 100).toFixed(3)} %`}; return;
       } } }
   const exp = plan.expIntro; if (exp == null){ (plan.earLog = plan.earLog || []).push(Math.round(lag * 1000)); lockInfo = {t: now, txt: `CALÉ SUR LE DROP · intro ${Math.round(lag * 1000)} ms`}; return; }
   (plan.earLog = plan.earLog || []).push(Math.round(lag * 1000));   // écart brut entendu
   lag -= exp;   // on ne corrige que l'écart qui n'est pas « voulu » par le calage du drop
+  // BPM validés au peigne des deux côtés + B1 / B2 calés au kick près : le calage est sûr, l'oreille écoute mais ne touche plus
+  // (ses mesures hésitent entre plusieurs attaques sur les kicks hardstyle, et chaque correction s'entend)
+  if (bothSure && plan.snap && plan.snap.B2_sort_ms != null && plan.snap.B1_entre_ms != null){ lockInfo = {t: now, txt: `CALÉ AU KICK ✓ (oreille ${Math.round(lag * 1000)} ms)`}; return; }
   const prev = plan.earLast; plan.earLast = lag;
-  if (Math.abs(lag) < 0.004){ lockInfo = {t: now, txt: 'CALÉ À L\'OREILLE ✓'}; return; }
+  if (Math.abs(lag) < 0.006){ lockInfo = {t: now, txt: 'CALÉ À L\'OREILLE ✓'}; return; }
   // On ne corrige que si deux écoutes de suite donnent le même écart (à 3 ms près) : pas de coup de pitch sur une fausse mesure
   if (prev == null || Math.abs(prev - lag) > 0.003){ lockInfo = {t: now, txt: `ÉCOUTE… ${Math.round(lag * 1000)} ms`}; return; }
   // On ne corrige que pendant l'intro de B (avant le swap des basses), 4 coups au plus
@@ -2641,7 +2652,7 @@ function earCheck(plan, now){
   // Écart inverse de la correction d'avant : l'oreille hésite entre deux attaques → on ne touche plus à rien
   if (plan.earPrevFix != null && Math.sign(plan.earPrevFix) !== Math.sign(lag) && Math.abs(lag + plan.earPrevFix) < 0.012){ plan.earFix = 99; lockInfo = {t: now, txt: 'OREILLE ? (doute)'}; return; }
   plan.earFix = (plan.earFix || 0) + 1; plan.earPrevFix = lag;
-  n.nudge(lag, Math.max(0.25, Math.abs(lag) / 0.03)); plan.earLast = null;
+  n.nudge(lag, Math.max(1, Math.abs(lag) / 0.003));   // en douceur : 0,3 % de vitesse au plus (inaudible), étalé sur plusieurs secondes plan.earLast = null; plan.earFixT = now; plan.earHist = [];
   lockInfo = {t: now, txt: `RECALAGE ${n.id} ${lag > 0 ? '+' : ''}${Math.round(lag * 1000)} ms`};
 }
 /* ---------- Éditeur de grille et de marqueurs (grand écran, précis) ----------
@@ -2719,7 +2730,12 @@ function edDraw(){
   const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
   if (ED.t && ED.driftFor !== ED.bpm + '|' + ED.fb){ ED.driftFor = ED.bpm + '|' + ED.fb; try { const L = gridLock(ED.t, ED.bpm, ED.fb); ED.driftTxt = L ? ` · Kicks / grille : ${L.driftBefore.map(v => v == null ? '–' : (v > 0 ? '+' : '') + v).join(' / ')} ms (début → fin)${Math.max(...L.driftBefore.filter(v => v != null).map(Math.abs)) > 12 ? ' ⚠ décalée : touche 🔒' : ' ✓'}` : ''; } catch(e){ ED.driftTxt = ''; } }
   if (ED.t && ED.spFor !== ED.bpm + '|' + ED.fb){ ED.spFor = ED.bpm + '|' + ED.fb; try { const sp = spliceScan(ED.t, ED.bpm, ED.fb); ED.spTxt = sp.length ? ` · ⚠ ${sp.length} coupure(s) de montage (kicks qui sautent de ${sp.map(q => (q.ms > 0 ? '+' : '') + q.ms).join(', ')} ms à ${sp.map(q => edBarNo(q.t)).join(', ')}) : la grille ne peut pas coller partout, cale-la sur la zone de tes repères` : ''; } catch(e){ ED.spTxt = ''; } }
-  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (64 temps après B2, 32 si trop près de la fin)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}${ED.driftTxt || ''}${ED.spTxt || ''}. Courbe en bas de la vue d'ensemble : points verts au milieu = clic pile sur les kicks. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
+  { const key = ED.bpm + '|' + (ED.m.bass ?? '') + '|' + (ED.m.bass2 ?? '');
+    if (ED.t && ED.valFor !== key){ ED.valFor = key; try { const v = bpmCheck(ED.t, ED.bpm, ED.m.bass, ED.m.bass2), ms = d => d == null ? '?' : (d >= 0 ? '+' : '') + Math.round(d * 1000);
+      ED.valTxt = ` · VALIDATION : peigne ${v.comb != null ? v.comb.toFixed(3) : '?'} ${v.okC ? '✓' : '✗ (BPM réglé ' + ED.bpm.toFixed(3) + ')'}`
+        + (v.beats != null ? ` · B1 → B2 = ${v.beats} temps ${v.ok12 ? '✓' : `✗ (${v.resid > 0 ? '+' : ''}${v.resid} ms en trop : BPM d'après tes basses ${v.bpm12.toFixed(3)})`} · kick réel : B1 ${ms(v.d1)} ms, B2 ${ms(v.d2)} ms de tes marqueurs (le mix cale sur le kick réel)` : '')
+        + (v.ok ? ' → ✅ BPM SÛR' : ' → ⚠ à vérifier'); } catch(e){ ED.valTxt = ''; } } }
+  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (64 temps après B2, 32 si trop près de la fin)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}${ED.valTxt || ''}${ED.driftTxt || ''}${ED.spTxt || ''}. Courbe en bas de la vue d'ensemble : points verts au milieu = clic pile sur les kicks. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
 }
 // Vérifier un son AVANT de le mixer : il est analysé (sans platine) puis ouvert dans l'éditeur
 async function checkItem(t, rest){
@@ -3260,7 +3276,8 @@ async function prepItem(t){
       { const tf = tempoFix(t); if (tf){ t.bpm = tf.bpm; t.firstBeat = t.start = tf.fb; t.tempoFixed = `${tf.from.toFixed(2)} → ${tf.bpm.toFixed(2)}`; } }
       const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
       try { const cb = combTempo(t, t.bpm); t.combConf = cb.sharp;
-        if (Math.abs(cb.bpm - t.bpm) > 0.02 && cb.score > 1.2 * cb.scoreCur){ const Tn = 60 / cb.bpm; t.combInfo = `${t.bpm.toFixed(3)} → ${cb.bpm.toFixed(3)} BPM (peigne ${cb.scoreCur.toFixed(2)} → ${cb.score.toFixed(2)})`;
+        const dB = Math.abs(cb.bpm - t.bpm);
+        if (dB > 0.003 && cb.score > (dB < 0.02 ? 1.02 : 1.2) * cb.scoreCur){ const Tn = 60 / cb.bpm; t.combInfo = `${t.bpm.toFixed(3)} → ${cb.bpm.toFixed(3)} BPM (peigne ${cb.scoreCur.toFixed(2)} → ${cb.score.toFixed(2)})`;
           t.bpm = cb.bpm; t.firstBeat = t.start = cb.phase + Math.round((t.firstBeat - cb.phase) / Tn) * Tn; } } catch(e){}
       // K posé à la main : il choisit QUEL kick est le départ, mais reste collé pile sur la grille mesurée
       if (!t.peaks) t.peaks = computePeaks(t.buffer);
@@ -3291,7 +3308,8 @@ async function prepItem(t){
     // Grille réglée à la main mais qui ne tombe pas sur les vrais kicks (ex. 33 ms à côté, ou BPM qui glisse) → on prévient
     if (t.manualGrid && !t._combChecked){ t._combChecked = true;
       try { const cb = combTempo(t, t.bpm); t.combConf = cb.sharp;
-        if (Math.abs(cb.bpm - t.bpm) > 0.02 && cb.score > 1.3 * cb.scoreCur){
+        const dB = Math.abs(cb.bpm - t.bpm);
+        if (dB > 0.003 && cb.score > (dB < 0.02 ? 1.02 : 1.3) * cb.scoreCur){
           const Tn = 60 / cb.bpm, nfb = cb.phase + Math.round((t.firstBeat - cb.phase) / Tn) * Tn;
           t.bpmWarn = null; t.gridWarn = `BPM corrigé au peigne : ${t.bpm.toFixed(3)} → ${cb.bpm.toFixed(3)} (accord ${cb.scoreCur.toFixed(2)} → ${cb.score.toFixed(2)})`;
           toast(`🎯 « ${t.name} » : le vrai tempo est ${cb.bpm.toFixed(3)} BPM (tu avais ${t.bpm.toFixed(3)}). Grille corrigée, tes repères K, B1, B2, C ne bougent pas.`, 7000);
@@ -3544,6 +3562,32 @@ function combTempo(t, b0){
   // netteté : le bon tempo doit nettement mieux « résonner » que ses voisins (± 0,05 et ± 0,1 BPM)
   const nb = Math.max(...[-0.1, -0.05, 0.05, 0.1].map(d => combScore(C, best.bpm + d, 2).s));
   return {bpm: best.bpm, phase: best.phase, score: best.s, scoreCur: cur, sharp: best.s / Math.max(1e-6, nb)};
+}
+// Point de basse « au kick près » : on garde la mesure choisie (marqueur), mais la position exacte est lue dans le son,
+// avec la même méthode (peigne) sur les deux sons → B1 du son qui entre et B2 du son qui sort sont calés sur la MÊME attaque.
+// Mesuré sur les 16 temps qui suivent le marqueur (là où la basse joue), ± 60 ms.
+function kickSnap(t, x, bpm){
+  try { if (!t || !t.buffer || x == null || !(bpm || t.bpm)) return {t: x, d: null};
+    const C = combEnv(t), T = 60 / (bpm || t.bpm), R = C.rate, e = C.e, W = Math.round(0.06 * R);
+    const nb = Math.min(16, Math.floor((t.buffer.duration - x - 0.1) / T)); if (nb < 6) return {t: x, d: null};
+    let best = -1, bo = 0, tot = 0, cnt = 0;
+    for (let d = -W; d <= W; d++){ let s = 0; for (let k = 0; k < nb; k++){ const i = Math.round((x + k * T) * R) + d; if (i >= 0 && i < C.n) s += e[i]; } tot += s; cnt++; if (s > best){ best = s; bo = d; } }
+    if (!(best > 1.6 * tot / cnt && best > 0.4)) return {t: x, d: null};
+    return {t: x + bo / R, d: bo / R};
+  } catch(e){ return {t: x, d: null}; }
+}
+// Validation du tempo « à 200 % » : 1) peigne sur tout le morceau, 2) B1 → B2 doit faire un nombre ENTIER de temps,
+// mesuré au kick près. Si les deux disent la même chose, le BPM est sûr.
+function bpmCheck(t, bpm, b1, b2){
+  const out = {};
+  try { const cb = combTempo(t, bpm); out.comb = cb.bpm; out.sharp = cb.sharp; } catch(e){}
+  if (b1 != null && b2 != null && b2 - b1 > 10){
+    const s1 = kickSnap(t, b1, bpm), s2 = kickSnap(t, b2, bpm), D = s2.t - s1.t, n = Math.round(D * bpm / 60);
+    out.beats = n; out.resid = Math.round((D - n * 60 / bpm) * 1000); out.bpm12 = n * 60 / D; out.d1 = s1.d; out.d2 = s2.d;
+  }
+  const okC = out.comb != null && Math.abs(out.comb - bpm) < 0.006, ok12 = out.bpm12 != null && Math.abs(out.bpm12 - bpm) < 0.01;
+  out.ok = okC && (out.bpm12 == null || ok12); out.okC = okC; out.ok12 = ok12;
+  return out;
 }
 // Phase locale au peigne : pour chaque fenêtre de wb temps, de combien les attaques sont décalées par rapport à la grille
 function localPhases(t, bpm, fb, wb = 16){
@@ -3828,7 +3872,7 @@ function phaseLock(){
   let f = 1; const lc = slave.lastCorr;
   slave.lastCorr = {t: now, late};
   // Coup de pitch comme un DJ : 4 % maximum, plus long si le décalage est grand
-  slave.nudge(late, Math.max(0.3, Math.abs(late) / 0.04), f);
+  slave.nudge(late, Math.max(1, Math.abs(late) / 0.003), f);
   lockInfo = {t: now, txt: `CALAGE ${slave.id} ${late > 0 ? '+' : ''}${Math.round(late * 1000)} ms`};
 }
 

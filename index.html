@@ -917,7 +917,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
           <div class="edgrp"><span class="edlbl">BPM</span><button data-bpm="-0.1">−0,1</button><button data-bpm="-0.01">−0,01</button><b id="ed-bpm">—</b><button data-bpm="0.01">+0,01</button><button data-bpm="0.1">+0,1</button><button data-bpmx="0.5">÷2</button><button data-bpmx="2">×2</button></div>
           <div class="edgrp"><span class="edlbl">Grille</span><button data-gs="-0.005">◀◀ 5 ms</button><button data-gs="-0.001">◀ 1</button><button data-gs="0.001">1 ▶</button><button data-gs="0.005">5 ms ▶▶</button></div>
           <div class="edgrp"><span class="edlbl">Zoom</span><button id="ed-zout">−</button><button id="ed-zin">+</button><button id="ed-play" class="edplay">▶ Écouter</button><button id="ed-click" class="edtog" aria-pressed="true">Clic grille</button></div>
-          <div class="edgrp"><span class="edlbl">BPM précis</span><button id="ed-measure" title="Place le curseur sur un kick loin du K (fin du morceau) puis touche ici">Mesurer K → curseur</button></div>
+          <div class="edgrp"><span class="edlbl">BPM précis</span><button id="ed-lock" title="Cale la grille (BPM et départ) au ms près sur les vrais kicks du morceau entier">🔒 Caler sur les kicks</button><button id="ed-measure" title="Place le curseur sur un kick loin du K (fin du morceau) puis touche ici">Mesurer K → curseur</button></div>
         </div>
         <div class="edbar">
           <div class="edgrp"><span class="edlbl">Poser au curseur</span><button data-em="kick" class="mk-k">K</button><button data-em="bass" class="mk-b1">B1</button><button data-em="bass2" class="mk-b2">B2</button><button data-em="out" class="mk-f">F</button><button data-em="cut" class="mk-c">C</button><button data-em="cutx" title="Enlever C">C ✕</button><button id="ed-free" class="edtog" aria-pressed="false" title="Libre : C exactement au curseur, B1/B2/F sur le temps le plus proche (au lieu de la mesure), K sans aimant">Mode libre</button></div>
@@ -959,7 +959,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 88</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 89</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2498,7 +2498,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
   let e = []; try { e = barEnergy(t); } catch(_){}
   const mx = Math.max(1e-9, ...e), around = b => b == null ? null : e.slice(Math.max(0, b - 4), b + 4).map(v => Math.round(100 * v / mx)).join(' ');
   return {nom: t.name, bpm: t.bpm, mesure: t.dbInfo || null, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar,
-    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
+    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, verrou_kicks: t.lockInfo || null, grille_a_verifier: t.gridWarn || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
     grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
@@ -2624,7 +2624,7 @@ function earCheck(plan, now){
   // On ne corrige que si deux écoutes de suite donnent le même écart (à 3 ms près) : pas de coup de pitch sur une fausse mesure
   if (prev == null || Math.abs(prev - lag) > 0.003){ lockInfo = {t: now, txt: `ÉCOUTE… ${Math.round(lag * 1000)} ms`}; return; }
   // On ne corrige que pendant l'intro de B (avant le swap des basses), 4 coups au plus
-  if (now > plan.tDrop - 2 * beat || (plan.earFix || 0) >= 4){ lockInfo = {t: now, txt: `ÉCART ${Math.round(lag * 1000)} ms`}; return; }
+  if (now > plan.tDrop + 32 * beat || (now > plan.tDrop - 2 * beat && now < plan.tDrop + 2 * beat) || (plan.earFix || 0) >= 4){ lockInfo = {t: now, txt: `ÉCART ${Math.round(lag * 1000)} ms`}; return; }
   // Écart inverse de la correction d'avant : l'oreille hésite entre deux attaques → on ne touche plus à rien
   if (plan.earPrevFix != null && Math.sign(plan.earPrevFix) !== Math.sign(lag) && Math.abs(lag + plan.earPrevFix) < 0.012){ plan.earFix = 99; lockInfo = {t: now, txt: 'OREILLE ? (doute)'}; return; }
   plan.earFix = (plan.earFix || 0) + 1; plan.earPrevFix = lag;
@@ -2697,7 +2697,8 @@ function edDraw(){
     if (ED.src){ const p = edPosNow(); g.fillStyle = '#ffb13d'; g.fillRect((p - v0) / px - 1, 0, 2, H); } }
   $('ed-bpm').textContent = ED.bpm.toFixed(2);
   const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
-  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (64 temps après B2, 32 si trop près de la fin)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
+  if (ED.t && ED.driftFor !== ED.bpm + '|' + ED.fb){ ED.driftFor = ED.bpm + '|' + ED.fb; try { const L = gridLock(ED.t, ED.bpm, ED.fb); ED.driftTxt = L ? ` · Kicks / grille : ${L.driftBefore.map(v => v == null ? '–' : (v > 0 ? '+' : '') + v).join(' / ')} ms (début → fin)${Math.max(...L.driftBefore.filter(v => v != null).map(Math.abs)) > 12 ? ' ⚠ décalée : touche 🔒' : ' ✓'}` : ''; } catch(e){ ED.driftTxt = ''; } }
+  $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (64 temps après B2, 32 si trop près de la fin)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}${ED.driftTxt || ''}. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
 }
 // Vérifier un son AVANT de le mixer : il est analysé (sans platine) puis ouvert dans l'éditeur
 async function checkItem(t, rest){
@@ -2818,6 +2819,13 @@ document.querySelectorAll('[data-mn],[data-mb]').forEach(b => b.addEventListener
 $('ed-zin').addEventListener('click', () => { if (ED.span > 0.05){ const c = ED.cur; ED.span /= 2; ED.view = c - ED.span / 3; edDraw(); } });
 $('ed-zout').addEventListener('click', () => { if (ED.span < 200){ const c = ED.cur; ED.span *= 2; ED.view = Math.max(-ED.span / 2, c - ED.span / 3); edDraw(); } });
 $('ed-play').addEventListener('click', edPlay);
+$('ed-lock').addEventListener('click', () => {
+  const L = gridLock(ED.t, ED.bpm, ED.fb);
+  if (!L || L.errAfter > 15){ toast('Pas assez de kicks nets pour caler la grille sur ce son (ou BPM trop loin : règle-le d\'abord à peu près). Utilise « Mesurer K → curseur ».', 4000); return; }
+  const Tn = 60 / L.bpm, nfb = L.fb + Math.round((ED.fb - L.fb) / Tn) * Tn, dk = ED.m.kick != null && Math.abs(ED.m.kick - ED.fb) < 1e-6;
+  ED.bpm = Math.round(L.bpm * 1000) / 1000; ED.fb = nfb; if (dk) ED.m.kick = nfb; ED.touched.add('grid'); ED.lockTxt = `grille calée sur ${L.n} kicks : écart ${L.errBefore.toFixed(1)} → ${L.errAfter.toFixed(1)} ms`;
+  toast(`🔒 Grille calée sur ${L.n} kicks — écart moyen ${L.errBefore.toFixed(1)} ms → ${L.errAfter.toFixed(1)} ms · ${ED.bpm.toFixed(3)} BPM`, 4000); edDraw();
+});
 $('ed-free').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); });
 $('ed-click').addEventListener('click', e => { const b = e.currentTarget; b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); });
 // BPM précis : K sur un kick au début, curseur sur un kick loin (fin du morceau) → BPM = nombre de temps / durée entre les deux
@@ -3209,6 +3217,11 @@ async function prepItem(t){
       // K posé à la main : il choisit QUEL kick est le départ, mais reste collé pile sur la grille mesurée
       if (!t.peaks) t.peaks = computePeaks(t.buffer);
       { const db = downbeat(t); t.firstBeat = t.start = db.fb; t.dbInfo = db;
+        // verrou sur les kicks : si la grille colle mieux aux vrais kicks, on prend ce BPM / départ exacts (même 1er temps)
+        try { const L = gridLock(t, t.bpm, t.firstBeat);
+          if (L && L.errAfter <= 8 && L.errAfter < L.errBefore - 0.5){   // seulement si les kicks sont nets (écart final ≤ 8 ms)
+            const Tn = 60 / L.bpm; t.bpm = L.bpm; t.firstBeat = t.start = L.fb + Math.round((t.firstBeat - L.fb) / Tn) * Tn; t.barE = t.barR = null; t.lockInfo = `${L.errBefore.toFixed(1)} → ${L.errAfter.toFixed(1)} ms sur ${L.n} kicks`; }
+        } catch(e){}
         // K1 (point de lancement) = le TOUT début du son, même s'il tombe entre deux temps de la grille.
         // La grille (temps, mesures, B1, B2…) reste sur les kicks ; le lancement compte la vraie distance K → B1.
         if (db.t0 != null && db.t0 < t.firstBeat + 0.6 * 60 / t.bpm) t.start = Math.max(0, db.t0);
@@ -3228,6 +3241,12 @@ async function prepItem(t){
       else if (t.markers && t.markers.kick != null){ t.start = t.markers.kick; } }   // K posé à la main : point de lancement exact, la grille reste
     if (!t.peaks) t.peaks = computePeaks(t.buffer);
     structureOf(t);
+    // Grille réglée à la main mais qui ne tombe pas sur les vrais kicks (ex. 33 ms à côté, ou BPM qui glisse) → on prévient
+    if (t.manualGrid && !t._gridChecked){ t._gridChecked = true;
+      try { const L = gridLock(t, t.bpm, t.firstBeat);
+        if (L && L.errAfter <= 6 && L.errBefore > 10){ t.gridWarn = `grille à ${L.errBefore.toFixed(0)} ms des kicks (dérive ${L.driftBefore.map(v => v ?? '–').join('/')} ms)`;
+          toast(`⚠ « ${t.name} » : ta grille tombe à ~${L.errBefore.toFixed(0)} ms des kicks. Ouvre l'éditeur et touche 🔒 « Caler sur les kicks ».`, 6000); }
+      } catch(e){} }
 }
 
 /* ---------- Dessin ---------- */
@@ -3424,7 +3443,37 @@ function kickOnsets(buf){
   const on = new Float32Array(n);
   for (let k = 3; k < n; k++){ const d = env[k] - Math.max(env[k - 2], env[k - 3]); on[k] = d > 0 ? d : 0; }
   for (let k = n - 1; k >= 2; k--) on[k] = 0.5 * on[k] + 0.3 * on[k - 1] + 0.2 * on[k - 2];
-  return {env: on, rate: 1000};
+  return {env: on, rate: sr / hop};   // (pas exactement 1000 si la fréquence ne tombe pas juste : 44,1 kHz → 1002,3)
+}
+// Verrou de grille sur les kicks (comme le « grid lock » des logiciels pro) :
+// pour chaque temps de la grille, on cherche l'attaque de kick la plus forte tout près (± 20 % du temps) au ms près,
+// on ignore les temps sans kick et les contretemps (reverse bass, basses roulantes), puis droite robuste → BPM et départ exacts.
+function gridLock(t, bpm, fb){
+  if (!t.buffer) return null;
+  const K = t._kOn || (t._kOn = kickOnsets(t.buffer)), e = K.env, rate = K.rate, D = t.buffer.duration, T0 = 60 / bpm, fb0 = fb;
+  const pick = (T, f, upTo) => { const pts = [];
+    for (let k = Math.ceil((0.2 - f) / T); f + k * T < Math.min(D - 0.2, upTo); k++){
+      const g = f + k * T, a = Math.max(0, Math.floor((g - 0.2 * T) * rate)), b = Math.min(e.length - 1, Math.ceil((g + 0.2 * T) * rate));
+      let m = 0, mi = -1; for (let i = a; i <= b; i++) if (e[i] > m){ m = e[i]; mi = i; }
+      if (mi >= 0) pts.push([k, mi / rate, m]); }
+    return pts; };
+  const fit = Q => { const n = Q.length; let sx = 0, sy = 0, sxx = 0, sxy = 0; for (const [k, x] of Q){ sx += k; sy += x; sxx += k * k; sxy += k * x; } const Tn = (n * sxy - sx * sy) / (n * sxx - sx * sx); return [Tn, (sy - Tn * sx) / n]; };
+  const strong = pts => { const hs = pts.map(p => p[2]).sort((x, y) => x - y), h = 0.35 * (hs[Math.floor(hs.length * 0.9)] || 0); return pts.filter(p => p[2] >= h); };
+  // on cale d'abord sur le début (le BPM approximatif ne dérive pas encore), puis on élargit à tout le morceau
+  let T = T0, f = fb, P = [];
+  for (const span of [0.2, 0.4, 0.7, 1]){
+    P = strong(pick(T, f, D * span)); if (P.length < 20) continue;
+    let [Tn, f0] = fit(P);
+    for (let it = 0; it < 3; it++){ const res = P.map(([k, x]) => Math.abs(x - (f0 + k * Tn))).sort((a, b) => a - b), mad = res[Math.floor(res.length / 2)], lim = Math.max(0.004, 3 * mad); const Q = P.filter(([k, x]) => Math.abs(x - (f0 + k * Tn)) <= lim); if (Q.length < 20) break; P = Q; [Tn, f0] = fit(P); }
+    if (!(Math.abs(Tn - T0) / T0 < 0.01)) return null;
+    T = Tn; f = f0;
+  }
+  if (P.length < 30) return null;
+  const all = strong(pick(T, f, D)), med = r => r.sort((a, b) => a - b)[Math.floor(r.length / 2)];
+  const errAfter = med(all.map(([k, x]) => Math.abs(x - (f + k * T)))) * 1000;
+  const old = strong(pick(T0, fb0, D)), errBefore = med(old.map(([k, x]) => Math.abs(x - (fb0 + k * T0)))) * 1000;
+  const drift = [0.1, 0.3, 0.5, 0.7, 0.9].map(q => { const r = all.filter(p => Math.abs(p[1] - D * q) < 8).map(([k, x]) => (x - (fb0 + Math.round((x - fb0) / T0) * T0)) * 1000); return r.length ? Math.round(med(r)) : null; });
+  return {bpm: 60 / T, fb: f, errBefore, errAfter, n: all.length, driftBefore: drift};
 }
 const onsetAt = (t, sec) => { const h = null; if (!h) return t.env ? envAt(t, sec) : 0; const x = sec * h.rate, i = Math.floor(x), f = x - i, e = h.env; return i >= 0 && i + 1 < e.length ? e[i] * (1 - f) + e[i + 1] * f : 0; };
 // Mesure du décalage par corrélation : renvoie le retard du second son (s) ou null si pas fiable

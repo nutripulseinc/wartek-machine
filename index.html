@@ -952,7 +952,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 82</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 83</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1347,6 +1347,18 @@ function structureOf(t){
   };
   const snap4 = b => { const r4 = Math.round(b / 4) * 4; return Math.abs(b - r4) <= 1 ? Math.max(0, r4) : b; };
   bi = bi <= 2 ? 0 : snap4(bi); bo = snap4(bo);
+  // B1 = début de la 1re VRAIE ligne de basse : un bloc de basse continu d'au moins 12 mesures.
+  // Si la basse s'arrête moins de 12 mesures après (pré-basse, intro, montée avec stabs), B1 passe au bloc suivant.
+  { let s0 = bi, guard = 0;
+    for (;;){
+      // fin du bloc = au moins 2 mesures sans basse (un petit fill d'une mesure ne coupe pas la ligne)
+      let j = s0; while (j < bo && !(e[j] < thr && (e[j + 1] ?? 0) < thr)) j++;
+      if (j - s0 >= 12 || j >= bo) break;
+      let k = j; while (k < bo && e[k] < thr) k++;
+      if (k >= bo - 8 || k - bi > 32 || ++guard > 4) break;
+      s0 = k;
+    }
+    if (s0 !== bi) bi = snap4(s0); }
   if (m.bass != null) bi = Math.max(0, Math.round((m.bass - t.firstBeat) / bar));
   if (m.out != null) bo = Math.max(bi + 1, Math.round((m.out - t.firstBeat) / bar));
   // B2 : début de la dernière ligne de basse (dernier bloc de basse continu avant la fin)
@@ -2183,7 +2195,8 @@ function makePlan(o, n){
   const phrase = 32 * ob;
   const grid = (t, step, up) => oPh + (up ? Math.ceil((t - oPh) / step - 1e-6) : Math.floor((t - oPh) / step + 1e-6)) * step;
   // Intro de B jusqu'à l'arrivée de sa basse / de son kick plein (en temps)
-  const introB = Math.max(0, Math.round((sn.drop - nStart) / nb));
+  // durée EXACTE K → B1 (en temps, pas arrondie) : K est au tout début du son, B1 sur la grille
+  let introB = Math.max(0, (sn.drop - nStart) / nb); if (Math.abs(introB - Math.round(introB)) < 0.02) introB = Math.round(introB);
   // Durée de B en arrière-plan (basses coupées) avant le swap : 32 temps (mix long), 16 (court) ou 0 (swap direct)
   const bgFor = max => {
     if (!synced) return Math.min(16, max);
@@ -2562,7 +2575,7 @@ function openEditor(d){
 function openEditorItem(t, d, cur){
   const st = structureOf(t);
   ED.d = d; ED.t = t; ED.bpm = t.bpm; ED.fb = t.firstBeat;
-  ED.m = {kick: t.firstBeat, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: t.markers && t.markers.cut != null ? t.markers.cut : null};
+  ED.m = {kick: t.start ?? t.firstBeat, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: t.markers && t.markers.cut != null ? t.markers.cut : null};
   ED.reset = false; ED.touched = new Set(); $('ed-free').setAttribute('aria-pressed', 'false');   // à l'ouverture : curseur sur les repères de la grille
   ED.cur = cur ?? t.firstBeat; ED.span = 4 * 4 * 60 / t.bpm; ED.view = Math.max(0, ED.cur - ED.span / 3);
   $('ed-title').textContent = `Éditeur · ${t.name}`;
@@ -2690,20 +2703,20 @@ $('ed-measure').addEventListener('click', () => {
 $('ed-close').addEventListener('click', () => { edStop(); $('editor').hidden = true; ED.list = null; if (!$('qpick').hidden) renderQPick(); });
 $('ed-auto').addEventListener('click', () => {
   const t = ED.t; ED.reset = true; ED.touched = new Set(); ED.bpm = t.autoBpm || t.bpm; ED.fb = t.autoFb ?? t.firstBeat;
-  const keep = {bpm: t.bpm, fb: t.firstBeat, m: t.markers, st: t.struct, mg: t.manualGrid};
+  const keep = {bpm: t.bpm, fb: t.firstBeat, k: t.start, m: t.markers, st: t.struct, mg: t.manualGrid};
   t.markers = {}; t.manualGrid = false; t.bpm = ED.bpm; t.firstBeat = t.start = ED.fb; t.struct = null; t.barE = null; t.barR = null;
   const st = structureOf(t);
-  ED.m = {kick: ED.fb, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: null};
-  Object.assign(t, {bpm: keep.bpm, firstBeat: keep.fb, start: keep.fb, markers: keep.m, struct: keep.st, manualGrid: keep.mg}); t.barE = null; t.barR = null;
+  ED.m = {kick: t.autoStart ?? ED.fb, bass: st.drop, bass2: st.lastBass, out: st.outro, cut: null};
+  Object.assign(t, {bpm: keep.bpm, firstBeat: keep.fb, start: keep.k, markers: keep.m, struct: keep.st, manualGrid: keep.mg}); t.barE = null; t.barR = null;
   toast('Valeurs de l\'analyse automatique remises : touche « Enregistrer » pour les garder.'); edDraw();
 });
 $('ed-save').addEventListener('click', () => {
   const t = ED.t, d = ED.d; edStop();
-  t.bpm = ED.bpm; t.firstBeat = t.start = ED.fb; t.manualGrid = true;
+  t.bpm = ED.bpm; t.firstBeat = ED.fb; t.start = ED.touched.has('kick') ? ED.fb : (ED.m.kick ?? ED.fb); t.manualGrid = true;
   // On ne fige que ce qui a été réglé à la main (ou l'était déjà) : le reste reste automatique
   const old = ED.reset ? {} : (t.markers || {}), nm = {};
   const gridMan = old.bpm != null || ED.touched.has('kick') || Math.abs(ED.bpm - (t.autoBpm ?? ED.bpm)) > 0.001 || Math.abs(ED.fb - (t.autoFb ?? ED.fb)) > 0.001;
-  if (gridMan){ nm.bpm = ED.bpm; nm.grid = ED.fb; nm.kick = ED.fb; }
+  if (gridMan){ nm.bpm = ED.bpm; nm.grid = ED.fb; nm.kick = ED.touched.has('kick') ? ED.fb : (ED.m.kick ?? ED.fb); }
   for (const k of ['bass', 'bass2', 'out']) if ((ED.touched.has(k) || old[k] != null) && ED.m[k] != null) nm[k] = ED.m[k];
   if (ED.m.cut != null) nm.cut = ED.m.cut;
   nm.ok = true;   // son vérifié à la main
@@ -3049,7 +3062,11 @@ async function prepItem(t){
       const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
       // K posé à la main : il choisit QUEL kick est le départ, mais reste collé pile sur la grille mesurée
       if (!t.peaks) t.peaks = computePeaks(t.buffer);
-      { const db = downbeat(t); t.firstBeat = t.start = db.fb; t.dbInfo = db; }
+      { const db = downbeat(t); t.firstBeat = t.start = db.fb; t.dbInfo = db;
+        // K1 (point de lancement) = le TOUT début du son, même s'il tombe entre deux temps de la grille.
+        // La grille (temps, mesures, B1, B2…) reste sur les kicks ; le lancement compte la vraie distance K → B1.
+        if (db.t0 != null && db.t0 < t.firstBeat + 0.6 * 60 / t.bpm) t.start = Math.max(0, db.t0);
+        t.autoStart = t.start; }
       t.autoBpm = t.bpm; t.autoFb = t.firstBeat;
       // Garde-fou : une grille / un K gardés en mémoire (anciennes versions) doivent tomber au DÉBUT du son.
       // Si le K mémorisé est après le début de la wave (ou avant 0), on l'ignore : K et grille repris de l'analyse.
@@ -3061,7 +3078,7 @@ async function prepItem(t){
           if (t.id) saveTrack(t);
         }
       }
-      if (t.markers && t.markers.bpm){ t.bpm = t.markers.bpm; t.firstBeat = t.start = t.markers.grid ?? t.firstBeat; t.manualGrid = true; }   // grille réglée à la main dans l'éditeur
+      if (t.markers && t.markers.bpm){ t.bpm = t.markers.bpm; t.firstBeat = t.markers.grid ?? t.firstBeat; t.start = t.markers.kick ?? t.firstBeat; t.manualGrid = true; }   // grille réglée à la main dans l'éditeur
       else if (t.markers && t.markers.kick != null){ const bl = 60 / t.bpm; t.firstBeat = t.start = t.firstBeat + Math.round((t.markers.kick - t.firstBeat) / bl) * bl; } }
     if (!t.peaks) t.peaks = computePeaks(t.buffer);
     structureOf(t);
@@ -3112,7 +3129,7 @@ function drawZoom(d){
   g.globalAlpha = 1;
   const st = d.item && d.item.struct;
   const k2 = plan && plan.o === d ? plan.oldStart : null;
-  if (st) [[d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'FIN'], [k2, '#ff4fd8', 'K2'], [plan && plan.o === d ? plan.cut : cutMarkOf(d.item), '#ffb13d', 'COUPE']].filter(x => x[0] != null).forEach(([tm, col, lb]) => {
+  if (st) [[d.item.start ?? d.firstBeat, '#20e6e8', 'KICK'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'FIN'], [k2, '#ff4fd8', 'K2'], [plan && plan.o === d ? plan.cut : cutMarkOf(d.item), '#ffb13d', 'COUPE']].filter(x => x[0] != null).forEach(([tm, col, lb]) => {
     const x = (tm - t0) * pps; if (x < 0 || x > W) return;
     g.fillStyle = col; g.fillRect(x - u, top, 2 * u, h);
     g.font = `${Math.round(11 * u)}px ${LCD_FONT}`; g.textBaseline = 'bottom'; g.fillText(lb, x + 3 * u, top + h);
@@ -3154,7 +3171,7 @@ function drawOver(d){
     const ph32 = 32 * d.beatLen, p0 = st.phrase0 ?? d.firstBeat;
     for (let t = p0 - Math.floor((p0 - d.firstBeat) / ph32) * ph32; t < d.duration; t += ph32) o.fillRect(Math.round(t / d.duration * W), 0, Math.max(1, u), H * 0.18);
     o.font = `${Math.round(H * 0.16)}px ${LCD_FONT}`; o.textBaseline = 'top';
-    [[d.firstBeat, '#20e6e8', 'K'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'F'], [cutMarkOf(d.item), '#ffb13d', 'C']].filter(x => x[0] != null).forEach(([t, col, lb], _, arr) => {
+    [[d.item.start ?? d.firstBeat, '#20e6e8', 'K'], [st.drop, C.go, 'B1'], [st.lastBass, '#e5ff3d', 'B2'], [st.outro, C.alert, 'F'], [cutMarkOf(d.item), '#ffb13d', 'C']].filter(x => x[0] != null).forEach(([t, col, lb], _, arr) => {
       // étiquettes qui se touchent (ex. K et B1 au même endroit) : on les décale vers le bas pour toutes les voir
       const x = Math.round(t / d.duration * W), w = H * 0.08 * (lb.length + 1);
       d._lbl = d._lbl || []; if (lb === 'K') d._lbl = [];

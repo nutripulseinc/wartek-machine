@@ -957,7 +957,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 86</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 87</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1037,28 +1037,32 @@ const AC = window.AudioContext || window.webkitAudioContext;
 const MOBILE = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
 let ctx; try { ctx = new AC({latencyHint: MOBILE ? 0.08 : 'playback'}); } catch(e){ ctx = new AC({latencyHint:'playback'}); }
 const gain = v => { const g = ctx.createGain(); g.gain.value = v; return g; };
-const masterBus = gain(0.75);
+const masterBus = gain(1);
 const limiter = ctx.createDynamicsCompressor();
-limiter.threshold.value = -6; limiter.knee.value = 6; limiter.ratio.value = 12; limiter.attack.value = 0.004; limiter.release.value = 0.25;
+limiter.threshold.value = -4; limiter.knee.value = 3; limiter.ratio.value = 20;   // sécurité : plafond ≈ -4 dB, transparent en dessous limiter.attack.value = 0.004; limiter.release.value = 0.25;
 const masterAn = ctx.createAnalyser(); masterAn.fftSize = 1024;
-limiter.connect(masterAn);
+// Les compresseurs du navigateur remontent tout seuls le volume après compression (« makeup » automatique ≈ 0,6 × la réduction à 0 dB).
+// Ça poussait le son dans le rouge quand Auto level était allumé : on annule cette remontée, ils ne font plus que BAISSER.
+const unMakeup = (c, thr, ratio) => { const g = ctx.createGain(); g.gain.value = Math.pow(10, -0.6 * (-(thr + (-thr) / ratio)) / 20); c.connect(g); return g; };
+const limOut = unMakeup(limiter, -4, 20);
+limOut.connect(masterAn);
 // Auto level : le son est séparé en basses / médiums / aigus. Si une bande pousse dans le rouge,
 // elle seule est baissée automatiquement, puis remonte quand ça se calme.
 const lr4 = (type, f) => { const a = ctx.createBiquadFilter(), b = ctx.createBiquadFilter(); a.type = b.type = type; a.frequency.value = b.frequency.value = f; a.Q.value = b.Q.value = Math.SQRT1_2; a.connect(b); return [a, b]; };
 const bandComp = (thr, att) => { const c = ctx.createDynamicsCompressor(); c.threshold.value = thr; c.knee.value = 6; c.ratio.value = 6; c.attack.value = att; c.release.value = 0.35; return c; };
 const xLow = lr4('lowpass', 200), xRest = lr4('highpass', 200), xMid = lr4('lowpass', 3200), xHigh = lr4('highpass', 3200);
 const cLow = bandComp(-9, 0.012), cMid = bandComp(-11, 0.006), cHigh = bandComp(-14, 0.003);
-const bandsIn = gain(1), bandsOut = gain(1);
-bandsIn.connect(xLow[0]); xLow[1].connect(cLow); cLow.connect(bandsOut);
+const bandsIn = gain(1), bandsOut = gain(0.68);   // (reste de remontée automatique mesuré : -3,3 dB, pour qu'Auto level ne soit jamais plus fort que sans)
+bandsIn.connect(xLow[0]); xLow[1].connect(cLow); unMakeup(cLow, -9, 6).connect(bandsOut);
 bandsIn.connect(xRest[0]); xRest[1].connect(xMid[0]); xRest[1].connect(xHigh[0]);
-xMid[1].connect(cMid); cMid.connect(bandsOut); xHigh[1].connect(cHigh); cHigh.connect(bandsOut);
+xMid[1].connect(cMid); unMakeup(cMid, -11, 6).connect(bandsOut); xHigh[1].connect(cHigh); unMakeup(cHigh, -14, 6).connect(bandsOut);
 bandsOut.connect(limiter);
 let autoLevel = true;
 function setAutoLevel(on){ autoLevel = on; try { masterBus.disconnect(); } catch(e){} masterBus.connect(on ? bandsIn : limiter); }
 setAutoLevel(true);
 const cueBus = gain(1), cueToHp = gain(1), masterToHp = gain(0), hpSum = gain(0.8);
 const hpAn = ctx.createAnalyser(); hpAn.fftSize = 1024;
-cueBus.connect(cueToHp); cueToHp.connect(hpSum); limiter.connect(masterToHp); masterToHp.connect(hpSum); hpSum.connect(hpAn);
+cueBus.connect(cueToHp); cueToHp.connect(hpSum); limOut.connect(masterToHp); masterToHp.connect(hpSum); hpSum.connect(hpAn);
 const mono = () => { const g = ctx.createGain(); g.channelCount = 1; g.channelCountMode = 'explicit'; g.channelInterpretation = 'speakers'; return g; };
 const monoM = mono(), monoH = mono(), merger2 = ctx.createChannelMerger(2);
 const spM = ctx.createChannelSplitter(2), spH = ctx.createChannelSplitter(2), merger4 = ctx.createChannelMerger(4);

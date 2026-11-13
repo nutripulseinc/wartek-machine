@@ -959,7 +959,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 90</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 91</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2498,10 +2498,10 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
   let e = []; try { e = barEnergy(t); } catch(_){}
   const mx = Math.max(1e-9, ...e), around = b => b == null ? null : e.slice(Math.max(0, b - 4), b + 4).map(v => Math.round(100 * v / mx)).join(' ');
   return {nom: t.name, bpm: t.bpm, mesure: t.dbInfo || null, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar,
-    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, verrou_kicks: t.lockInfo || null, grille_a_verifier: t.gridWarn || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
+    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, verrou_kicks: t.lockInfo || null, grille_a_verifier: t.gridWarn || null, bpm_a_verifier: t.bpmWarn || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
-    grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
+    grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
   if (DIAG.length > 6) DIAG.shift();
 }
 function finishTransition(){
@@ -2616,6 +2616,17 @@ function earCheck(plan, now){
   plan.earT = now;
   let lag = earLag(n, Math.min(6, free - 0.3), beat);
   if (lag == null){ lockInfo = {t: now, txt: 'OREILLE ?'}; return; }
+  // Tempo à l'oreille : si l'écart GLISSE avec le temps, c'est que les BPM ne sont pas exactement les mêmes
+  // (ex. 156,153 noté au lieu de 156). Comme un DJ qui touche le pitch, on corrige la VITESSE du son qui entre.
+  { const H = plan.earHist = (plan.earHist || []).filter(h => now - h.t < 24); H.push({t: now, lag: lag - (plan.expIntro || 0)});
+    if (H.length >= 4 && H[H.length - 1].t - H[0].t >= 6 && now < (plan.tFade || Infinity)){
+      const m = H.length, mt = H.reduce((a, h) => a + h.t, 0) / m, ml = H.reduce((a, h) => a + h.lag, 0) / m;
+      let sxy = 0, sxx = 0; for (const h of H){ sxy += (h.t - mt) * (h.lag - ml); sxx += (h.t - mt) ** 2; }
+      const sl = sxy / sxx, res = Math.sqrt(H.reduce((a, h) => a + (h.lag - (ml + sl * (h.t - mt))) ** 2, 0) / m);
+      if (Math.abs(sl) >= 0.0004 && res < 0.006 && Math.abs((plan.rateFix || 0) + sl) < 0.006){
+        plan.rateFix = (plan.rateFix || 0) + sl; n.setRate(n.rate * (1 + sl), now + 0.05); plan.earHist = [];
+        lockInfo = {t: now, txt: `TEMPO ${n.id} ${sl > 0 ? '+' : ''}${(sl * 100).toFixed(3)} %`}; return;
+      } } }
   const exp = plan.expIntro; if (exp == null){ (plan.earLog = plan.earLog || []).push(Math.round(lag * 1000)); lockInfo = {t: now, txt: `CALÉ SUR LE DROP · intro ${Math.round(lag * 1000)} ms`}; return; }
   (plan.earLog = plan.earLog || []).push(Math.round(lag * 1000));   // écart brut entendu
   lag -= exp;   // on ne corrige que l'écart qui n'est pas « voulu » par le calage du drop
@@ -2719,8 +2730,8 @@ setInterval(async () => {
   prepItem.busy = false; Object.values(decks).forEach(renderQueue); if (!$('qpick').hidden) renderQPick();
 }, 4000);
 function isChecked(t){ return !!(t && t.markers && t.markers.ok); }
-function isDoubt(t){ return !isChecked(t) && !!(t && t.doubt && t.doubt.length); }
-const doubtTxt = t => isDoubt(t) ? ` <span class="qwarn" title="À vérifier : ${t.doubt.join(', ')} incertain">⚠ ${t.doubt.join(' ')}</span>` : '';
+function isDoubt(t){ return !!(t && t.bpmWarn) || (!isChecked(t) && !!(t && t.doubt && t.doubt.length)); }
+const doubtTxt = t => !isDoubt(t) ? '' : t.bpmWarn && isChecked(t) ? ` <span class="qwarn" title="${t.bpmWarn}">⚠ BPM</span>` : ` <span class="qwarn" title="À vérifier : ${(t.doubt || []).join(', ')} incertain">⚠ ${[...(t.doubt || []), ...(t.bpmWarn ? ['BPM'] : [])].filter((v, i, a) => a.indexOf(v) === i).join(' ')}</span>`;
 function edStop(){ if (ED.src){ try { ED.src.stop(); } catch(e){} ED.src = null; } ED.loopAB = null; document.querySelectorAll('[data-lp]').forEach(b => b.classList.remove('on')); cancelAnimationFrame(ED.raf); $('ed-play').classList.remove('on'); $('ed-play').textContent = '▶ Écouter'; edDraw(); }
 function edPosNow(){ const L = ED.loopAB; if (L){ const len = L.b - L.a; return L.a + (((ctx.currentTime - L.t0) % len) + len) % len; } return ED.srcOff + (ctx.currentTime - ED.srcT0); }
 // Boucle A→B autour du repère choisi (ou du curseur) : on fabrique la boucle avec le clic de la grille
@@ -3239,6 +3250,11 @@ async function prepItem(t){
     // Grille réglée à la main mais qui ne tombe pas sur les vrais kicks (ex. 33 ms à côté, ou BPM qui glisse) → on prévient
     if (t.manualGrid && !t._gridChecked){ t._gridChecked = true;
       try { const L = gridLock(t, t.bpm, t.firstBeat);
+        const dv = L ? L.driftBefore.filter(v => v != null) : [], drng = dv.length > 2 ? Math.max(...dv) - Math.min(...dv) : 0;
+        if (L && drng > 30 && !(L.errBefore > 8 && L.errAfter < L.errBefore / 2)){
+          t.bpmWarn = `la grille glisse de ${Math.round(drng)} ms sur le morceau (${dv.join(' / ')} ms) : BPM ${t.bpm.toFixed(3)} sûrement un peu faux`;
+          toast(`⚠ « ${t.name} » : le BPM ${t.bpm.toFixed(3)} glisse de ~${Math.round(drng)} ms entre le début et la fin. Dans l'éditeur : K sur un kick du début, curseur sur un kick de la fin, « Mesurer K → curseur ».`, 7000);
+        }
         if (L && L.errBefore > 8 && L.errAfter < L.errBefore / 2){
           const Tn = 60 / L.bpm, nfb = L.fb + Math.round((t.firstBeat - L.fb) / Tn) * Tn;
           t.gridWarn = `grille recalée sur les kicks : ${L.errBefore.toFixed(0)} → ${L.errAfter.toFixed(0)} ms, ${t.bpm.toFixed(3)} → ${L.bpm.toFixed(3)} BPM`;

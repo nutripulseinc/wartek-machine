@@ -952,7 +952,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 83</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 84</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1332,7 +1332,12 @@ function structureOf(t){
   if (t.struct) return t.struct;
   const e = barEnergy(t), r = barRms(t), nb = e.length, bar = 240 / t.bpm, m = t.markers || {};
   const sorted = [...e].sort((a, b) => a - b), ref = sorted[Math.floor(nb * 0.75)] || 0, flo0 = sorted[Math.floor(nb * 0.1)] || 0, flo = ref - flo0 > 0.25 * ref ? flo0 : 0, thr = flo + 0.4 * (ref - flo);   // au-dessus de la traîne des kicks seuls
-  let bi = e.findIndex((v, i) => v >= thr && (e[i + 1] ?? v) >= thr); if (bi < 0) bi = 0;
+  // Graves sur toute la mesure (comme la couleur de la wave sur la platine) : la vraie ligne de basse les remplit,
+  // une intro avec seulement des kicks (même à longue queue) non. B1 doit avoir les DEUX.
+  const Lb = (() => { const lo = t.peaks.lo, out = []; for (let b = 0; b < nb; b++){ const s0 = Math.floor((t.firstBeat + b * bar) * RES), s1 = Math.floor((t.firstBeat + (b + 1) * bar) * RES); let a = 0, c = 0; for (let i = Math.max(0, s0); i < s1 && i < lo.length; i++){ a += lo[i]; c++; } out.push(c ? a / c : 0); } return out; })();
+  const Ls = [...Lb].sort((a, b) => a - b), Lref = Ls[Math.floor(nb * 0.75)] || 0, Lflo = Ls[Math.floor(nb * 0.1)] || 0, Lthr = Lflo + 0.55 * (Lref - Lflo);
+  const isBass = i => i >= 0 && i < nb && e[i] >= thr && Lb[i] >= Lthr;
+  let bi = e.findIndex((v, i) => isBass(i) && isBass(i + 1)); if (bi < 0) bi = e.findIndex((v, i) => v >= thr && (e[i + 1] ?? v) >= thr); if (bi < 0) bi = 0;
   let bo = nb; for (let i = nb - 1; i > bi; i--) if (e[i] >= thr && (e[i - 1] ?? e[i]) >= thr){ bo = i + 1; break; }
   const mx = a => Math.max(1e-9, ...a), em = mx(e), rm = mx(r), x = e.map((v, i) => v / em + r[i] / rm);
   const ch = new Array(nb).fill(0);
@@ -1352,9 +1357,9 @@ function structureOf(t){
   { let s0 = bi, guard = 0;
     for (;;){
       // fin du bloc = au moins 2 mesures sans basse (un petit fill d'une mesure ne coupe pas la ligne)
-      let j = s0; while (j < bo && !(e[j] < thr && (e[j + 1] ?? 0) < thr)) j++;
+      let j = s0; while (j < bo && !(!isBass(j) && !isBass(j + 1))) j++;
       if (j - s0 >= 12 || j >= bo) break;
-      let k = j; while (k < bo && e[k] < thr) k++;
+      let k = j; while (k < bo && !isBass(k)) k++;
       if (k >= bo - 8 || k - bi > 32 || ++guard > 4) break;
       s0 = k;
     }
@@ -1418,6 +1423,7 @@ function structureOf(t){
     if (m.out == null && bo < nb){ let best = bo, bs = -Infinity; for (let k = Math.max(bi + 2, bo - 3); k <= Math.min(nb - 1, bo + 3); k++){ const j = (ev(k - 1) + ev(k - 2)) - (ev(k) + ev(k + 1)); if (j > bs + 1e-9){ bs = j; best = k; } } if (bs > 0.2 * (ref - flo)) bo = best; } }
   if (m.bass2 != null) b2 = Math.max(bi, Math.round((m.bass2 - t.firstBeat) / bar));
   const bl = bar / 4, onBeat = x => t.firstBeat + Math.round((x - t.firstBeat) / bl) * bl;
+  t._dbgBars = {graves_entre_kicks: e.slice(0, 48).map(v => Math.round(100 * v / (ref || 1))).join(' '), graves_mesure: Lb.slice(0, 48).map(v => Math.round(100 * v / (Lref || 1))).join(' '), seuils: [Math.round(100 * thr / (ref || 1)), Math.round(100 * Lthr / (Lref || 1))]};
   t.struct = {drop: m.bass != null ? onBeat(m.bass) : t.firstBeat + bi * bar, outro: m.out != null ? onBeat(m.out) : t.firstBeat + bo * bar, dropBar: bi, outroBar: bo, nb, phrase0: t.firstBeat + ph * bar, phraseBar: ph,
               lastBass: b2 == null ? null : (m.bass2 != null ? onBeat(m.bass2) : t.firstBeat + b2 * bar), lastBar: b2};
   return t.struct;
@@ -2429,7 +2435,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
   let e = []; try { e = barEnergy(t); } catch(_){}
   const mx = Math.max(1e-9, ...e), around = b => b == null ? null : e.slice(Math.max(0, b - 4), b + 4).map(v => Math.round(100 * v / mx)).join(' ');
   return {nom: t.name, bpm: t.bpm, mesure: t.dbInfo || null, fit: t.fitInfo ? {ecart_ms: +(t.fitInfo.rms * 1000).toFixed(2), kicks: t.fitInfo.n} : 'aucun', K: +(t.start ?? t.firstBeat).toFixed(4), B1: st.dropBar, B2: st.lastBar, F: st.outroBar,
-    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}}; }
+    basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
     grille_locale: p.local || null, oreille_ms: p.earLog || [], corrections: p.earFix || 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
@@ -3027,7 +3033,7 @@ $('qp-ok').addEventListener('click', () => {
 document.addEventListener('click', e => { const b = e.target.closest('[data-qpick]'); if (b) openQPick(b.dataset.qpick); });
 $('lib-file').addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; if (files.length){ addFiles(files); renderLib(); } });
 $('diag-copy').addEventListener('click', async () => {
-  const txt = 'RAPPORT WARTEK MACHINE\n' + JSON.stringify({ua: navigator.userAgent, mix: DIAG.length ? DIAG : 'aucun mix terminé', en_cours: plan ? {sort: diagTrack(plan.o), entre: diagTrack(plan.n), oreille_ms: plan.earLog || []} : null}, null, 1);
+  const txt = 'RAPPORT WARTEK MACHINE\n' + JSON.stringify({ua: navigator.userAgent, platines: {A: diagTrack(decks.A), B: diagTrack(decks.B)}, mix: DIAG.length ? DIAG : 'aucun mix terminé', en_cours: plan ? {sort: diagTrack(plan.o), entre: diagTrack(plan.n), oreille_ms: plan.earLog || []} : null}, null, 1);
   try { await navigator.clipboard.writeText(txt); toast('Rapport copié : colle-le dans la conversation avec Claude.'); }
   catch(e){ const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Rapport copié.'); } catch(_){ toast('Copie impossible ici.'); } ta.remove(); }
 });

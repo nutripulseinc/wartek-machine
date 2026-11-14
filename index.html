@@ -990,7 +990,12 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 115</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 116</p>
+        </div>
+        <div class="sgroup">
+          <h3>Sons de départ</h3>
+          <p class="snote" id="start-note">À l'ouverture de l'appli : les deux premiers sons de ta bibliothèque.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="dbtn" id="start-set">Garder les sons des platines A et B</button><button class="dbtn" id="start-clr">Revenir au choix automatique</button></div>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -4225,6 +4230,15 @@ function setLite(on){
 }
 $('lite').addEventListener('click', () => setLite(!LITE));
 if ($('appver').textContent.includes('__' + 'VER__')) $('appver').textContent = 'WARTEK MACHINE · aperçu';
+// Sons de départ : les sons chargés sur A et B maintenant reviendront à chaque ouverture de l'appli
+{ const note = () => { let st = null; try { st = JSON.parse(localStorage.getItem('wm-start') || 'null'); } catch(e){}
+    const nm = id => (lib.find(t => t.id === id) || {}).name || '—';
+    $('start-note').textContent = st ? `À l'ouverture : A = « ${nm(st.A)} », B = « ${nm(st.B)} ».` : "À l'ouverture de l'appli : les deux premiers sons de ta bibliothèque."; };
+  $('start-set').addEventListener('click', () => { const a = decks.A.item, b = decks.B.item;
+    if (!(a && a.id) && !(b && b.id)){ toast('Charge d\'abord tes sons (de ta bibliothèque) sur les platines.'); return; }
+    try { localStorage.setItem('wm-start', JSON.stringify({A: a && a.id, B: b && b.id})); } catch(e){} note(); toast('Sons de départ gardés.', 2500); });
+  $('start-clr').addEventListener('click', () => { try { localStorage.removeItem('wm-start'); } catch(e){} note(); toast('Sons de départ : choix automatique.', 2500); });
+  document.querySelectorAll('[data-open="settings"], #setopen').forEach(b => b.addEventListener('click', note)); setTimeout(note, 4000); }
 // Réglages avancés cachés : 5 taps rapides sur la ligne de version font apparaître le rapport de mix (mémorisé sur ce téléphone)
 { const sec = $('diag-sec'), KEY = 'wm-adv'; let n = 0, tm = 0;
   try { if (localStorage.getItem(KEY) === '1') sec.hidden = false; } catch(e){}
@@ -4288,7 +4302,11 @@ applySkin(savedSkin);
       const qs = await idb('samples', 'readonly', st => st.get('__queues'));
       if (qs) for (const id of ['A', 'B']){ decks[id].queue = (qs[id] || []).map(x => saved.find(t => t.id === ((saved.alias || {})[x] || x))).filter(Boolean); renderQueue(decks[id]); }
     } catch(e){}
-    if (saved.length){ loadItem(0, 'A'); if (lib[1]) loadItem(1, 'B'); }
+    // Sons de départ choisis dans les Réglages (sinon les deux premiers de la bibliothèque)
+    let st = null; try { st = JSON.parse(localStorage.getItem('wm-start') || 'null'); } catch(e){}
+    const ia = st ? lib.findIndex(t => t.id && t.id === st.A) : -1, ib = st ? lib.findIndex(t => t.id && t.id === st.B) : -1;
+    if (ia >= 0 || ib >= 0){ if (ia >= 0) loadItem(ia, 'A'); if (ib >= 0) loadItem(ib, 'B'); }
+    else if (saved.length){ loadItem(0, 'A'); if (lib[1]) loadItem(1, 'B'); }
     else { decks.A.load(lib[0]); decks.B.load(lib[1]); }
     xfCtl.set(0);
   } catch(e){ console.error('demo', e && e.message); }

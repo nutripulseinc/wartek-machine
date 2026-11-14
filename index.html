@@ -990,7 +990,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 111</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 112</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2447,11 +2447,14 @@ function makePlan(o, n){
   // doit toujours taper) et le swap des basses attend que B ait une vraie grosse basse (par blocs de 16 temps), au plus tard C.
   let swapBeats = 0, weakTxt = '';
   const bDropT = bStart + I * nb;
-  if (synced && I > 0){ const eA = lowLevel(o.item, P, P + 16 * ob), eB1 = lowLevel(n.item, bDropT, bDropT + 16 * nb);
-    if (eA && eB1 != null && eB1 < 0.6 * eA){
-      const maxB = Math.floor(cutBars * 4 / 16 + 1e-6) * 16; swapBeats = maxB;
-      for (let k = 16; k < maxB; k += 16){ const e = lowLevel(n.item, bDropT + k * nb, bDropT + (k + 16) * nb); if (e != null && e >= 0.75 * eA){ swapBeats = k; break; } }
-      weakTxt = `basse de B1 (${n.id}) ${Math.round(20 * Math.log10(eB1 / eA))} dB sous celle de ${o.id} : ${o.id} garde sa basse, swap ${swapBeats ? swapBeats + ' temps après B1' : 'à B1 quand même'}`; } }
+  if (synced && I > 0){ const eA = lowLevel(o.item, P, P + 16 * ob), eB1 = lowLevel(n.item, bDropT, bDropT + 16 * nb), eB8 = lowLevel(n.item, bDropT, bDropT + 8 * nb);
+    // B1 sans vraie basse (voix, montée…) : soit faible en moyenne, soit quasi rien sur ses 8 premiers temps
+    if (eA && eB1 != null && (eB1 < 0.6 * eA || (eB8 != null && eB8 < 0.45 * eA))){
+      // A garde TOUT (basses, médiums, aigus) et habille B ; le relais se fait mesure par mesure, dès que B tape une vraie basse
+      // (8 temps d'affilée au niveau), au plus tard à C
+      const maxB = Math.max(4, Math.floor(cutBars * 4 / 4 + 1e-6) * 4); swapBeats = maxB;
+      for (let k = 4; k < maxB; k += 4){ const e = lowLevel(n.item, bDropT + k * nb, bDropT + (k + 8) * nb); if (e != null && e >= 0.7 * eA){ swapBeats = k; break; } }
+      weakTxt = `B1 de ${n.id} sans vraie basse (${Math.round(20 * Math.log10(Math.max(1e-6, Math.min(eB1, eB8 ?? eB1)) / eA))} dB) : ${o.id} garde basses, médiums et aigus, relais des basses ${swapBeats} temps après B1${swapBeats >= maxB ? ' (à C)' : ' (B tape sa basse)'}`; } }
   // Trick DJ : à la petite coupure de fin des 32 premiers temps ensemble, on laisse A seul (voir startTransition)
   // Deux tricks possibles : fin des 32 premiers temps ensemble, puis fin des 32 suivants (temps 33 à 64)
   const trick = [];
@@ -2607,7 +2610,7 @@ function startTransition(dt){
   for (let i = 1; i < L; i++){
     const f = i / L, t = T0 + i * beat, dk = dyn(plan.oldStart + i * o.beatLen);
     schedule(n, 'vol', Math.round((42 + 46 * f) * dk), t, 0.12);
-    if (i % 4 === 0){ schedule(n, 'mid', Math.round(-9 + 8 * f), t, 0.08); schedule(n, 'hi', Math.round(-5 + 5 * f), t, 0.08); schedule(o, 'hi', Math.round(-4 * f), t, 0.08); }
+    if (i % 4 === 0){ schedule(n, 'mid', Math.round(-9 + 8 * f), t, 0.08); schedule(n, 'hi', Math.round(-5 + 5 * f), t, 0.08); if (!plan.swapBeats) schedule(o, 'hi', Math.round(-4 * f), t, 0.08); }
   }
   // Bass swap : sur le temps fort, basses de A coupées net et basses de B libérées, instantanément
   const tSwap = tDrop + (plan.swapBeats || 0) * beat;   // = tDrop, sauf si B1 est trop faible : A garde sa basse jusque-là

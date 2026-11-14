@@ -971,7 +971,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 105</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 106</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2317,7 +2317,8 @@ function makePlan(o, n){
     if (a.d != null){ so.lastBass = a.t; snap.B2_sort_ms = Math.round(a.d * 1000); } if (b.d != null){ sn.drop = b.t; snap.B1_entre_ms = Math.round(b.d * 1000); } }
   { const fo = (o.item.markers && o.item.markers.fine) || 0, fn = (n.item.markers && n.item.markers.fine) || 0;   // calage fin réglé à l'oreille
     if (so.lastBass != null && fo) so.lastBass += fo; if (sn.drop != null && fn) sn.drop += fn; if (fo || fn){ snap.fin_sort_ms = Math.round(fo * 1000); snap.fin_entre_ms = Math.round(fn * 1000); } }
-  let r = tempoRatio(o, n); const synced = Math.abs(r - 1) <= 0.16; if (!synced) r = 1;
+  // Écart de tempo de plus de 12 % = changement de style (speedcore, rap, house, dub…) : pas de calage forcé, transition en REWIND
+  let r = tempoRatio(o, n); const synced = Math.abs(r - 1) <= 0.12; if (!synced) r = 1;
   const ob = o.beatLen, nb = n.beatLen, pos = o.pos(), lead = 1.2 * o.rate;
   const E = endOfMusic(o.item);
   // B part toujours sur un début de SA phrase de 32 temps, A est compté sur SES phrases : les blocs de 32 tombent ensemble
@@ -2371,6 +2372,13 @@ function makePlan(o, n){
     if (cA < pos + lead) cA = grid(pos + lead, 4 * ob, true);
     aStart = cA; I = 0; why = 'Tempos trop éloignés : B part sur son K1 quand A coupe';
   }
+  // Changement de style : rewind (pull up) du vinyle de A sur un temps 1, puis B part 8 ou 4 temps avant son B1 → paf, B1
+  let rewind = null;
+  if (!synced && sn.drop != null){ const can8 = sn.drop - 8 * nb >= 0, can4 = sn.drop - 4 * nb >= 0;
+    const rl = can8 && can4 ? (Math.random() < 0.5 ? 8 : 4) : can8 ? 8 : can4 ? 4 : 0;
+    const la = fullLevel(o.item, aStart - 16 * ob, aStart), lb = fullLevel(n.item, sn.drop, sn.drop + 16 * nb);
+    rewind = {L: rl, bStart: sn.drop - rl * nb, match: la && lb ? clamp(la / lb, 0.71, 1.41) : 1};
+    why = `Changement de style (${Math.round(o.bpm * o.rate)} → ${Math.round(n.bpm)} BPM) : rewind de ${o.id}, ${n.id} lancé ${rl} temps avant son B1`; }
   const P = aStart + I * ob;
   // B part sur son 1er kick (kick dès le début) ou I temps avant sa basse : son swap tombe pile sur P
   const bStart = (introB === 0 || !synced) ? nStart : sn.drop - I * nb;
@@ -2437,7 +2445,7 @@ function makePlan(o, n){
       eq = {bLo: r1(clamp((ra.lo - rb.lo) * 0.5, -3, 3)), bMid: r1(clamp((ra.mid - rb.mid) * 0.5, -3, 3)), bHi: r1(clamp((ra.hi - rb.hi) * 0.5, -3, 3)),
             aMid: r1(clamp(-2 - (A.mid - B.mid) * 0.6, -8, 0)), aHi: r1(clamp(-2 - (A.hi - B.hi) * 0.6, -8, 0))};
       eq.txt = `${n.id} : graves ${eq.bLo >= 0 ? '+' : ''}${eq.bLo}, médiums ${eq.bMid >= 0 ? '+' : ''}${eq.bMid}, aigus ${eq.bHi >= 0 ? '+' : ''}${eq.bHi} dB · ${o.id} pendant B1/B2 : médiums ${eq.aMid}, aigus ${eq.aHi} dB`; } }
-  return {eq, keepLo, match, matchTxt, swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+  return {rewind, eq, keepLo, match, matchTxt, swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + stopBars * 4 + 8, trick, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
@@ -2475,7 +2483,46 @@ function paramAt(d, key, v, t, tc = 0.03){
 }
 function schedule(d, key, v, t, tc){ plan.events.push({d, key, v, t, tc}); }
 
+// ===== Transition REWIND (changement de style) : le DJ fait tourner le vinyle de A à l'envers (pull up),
+// puis le nouveau son part quelques temps avant son B1, à SON tempo d'origine, au niveau de A.
+function startRewind(dt){
+  const {o, n} = plan, now = ctx.currentTime, T0 = now + Math.max(LEAD(), dt), beat = o.beatLen / o.rate, R = plan.rewind;
+  const RW = clamp(2 * beat, 0.9, 1.5);   // durée du rewind (~2 temps)
+  plan.scheduled = true; plan.events = []; plan.T0 = T0;
+  // le bout de A juste avant le point de rewind, à l'envers
+  try { const b = o.buffer, sr = b.sampleRate, posR = clamp(plan.oldStart, 0.5, b.duration), seg = Math.min(posR, RW * 3.4 * o.rate);
+    const i1 = Math.floor(posR * sr), len = Math.floor(seg * sr), rev = ctx.createBuffer(b.numberOfChannels, len, sr);
+    for (let c = 0; c < b.numberOfChannels; c++){ const src = b.getChannelData(c), dst = rev.getChannelData(c); for (let i = 0; i < len; i++) dst[i] = src[i1 - 1 - i] || 0; }
+    const rs = ctx.createBufferSource(), rg = ctx.createGain(); rs.buffer = rev;
+    rs.playbackRate.setValueAtTime(0.35, T0); rs.playbackRate.exponentialRampToValueAtTime(3.4, T0 + RW * 0.4);
+    rg.gain.setValueAtTime(1, T0); rg.gain.setValueAtTime(1, T0 + RW * 0.55); rg.gain.linearRampToValueAtTime(0, T0 + RW);
+    rs.connect(rg); rg.connect(o.trimG); rs.start(T0); rs.stop(T0 + RW + 0.05); plan.rwSrc = rs;
+  } catch(e){}
+  // A lui-même s'arrête net sur le temps (le rewind prend sa place)
+  o.input.gain.cancelScheduledValues(0); o.input.gain.setValueAtTime(o.input.gain.value, now); o.input.gain.setValueAtTime(0, T0);
+  schedule(o, 'filt', 35, T0 + RW * 0.3, 0.15);   // le rewind s'éclaircit en tournant
+  // B : à SON tempo, prêt à fond (basses comprises), au niveau de A
+  const tB = T0 + RW; n.setRate(1);
+  [['lo', 0], ['mid', 0], ['hi', 0], ['filt', 0], ['vol', 100]].forEach(([k, v]) => { paramAt(n, k, v, now, 0.01); n.ctl[k].set(v, false); });
+  n.item.mixTrim = R.match; n.trimG.gain.setTargetAtTime((n.item.gainTrim ?? 1) * R.match, now, 0.02);
+  n.input.gain.cancelScheduledValues(0); n.input.gain.setValueAtTime(0, tB - 0.006); n.input.gain.linearRampToValueAtTime(1, tB);
+  n.playAt(tB - 0.006, Math.max(0, R.bStart - 0.006)); n.t0 = tB - 0.006;
+  schedule(null, 'xf', n.id === 'A' ? 0 : 100, tB, 0.02);
+  // Habillage DJ : la fin du rewind part en écho, sirène pendant la relance, B monte au filtre sur ses temps d'avant B1 → paf, B1 à fond
+  schedule(o, 'fx', {name: 'echo', amt: 0.6, rate: 0.5, fb: 0.45}, T0 + RW * 0.6, 0.05);
+  { const nB = n.beatLen, tB1 = tB + R.L * nB, steps = R.L;
+    schedule(n, 'filt', -42, tB - 0.02, 0.01);
+    for (let i = 1; i < steps; i++) schedule(n, 'filt', Math.round(-42 * (1 - i / steps)), tB + i * nB, 0.06);
+    schedule(n, 'filt', 0, tB1 - 0.01, 0.005);
+    try { const sm = (n.samples || []).find(x => /sir/i.test(x.name)) || (n.samples || [])[1];
+      if (sm && sm.buffer){ const ss = ctx.createBufferSource(), sg = ctx.createGain(); ss.buffer = sm.buffer; sg.gain.setValueAtTime(0.55, tB);
+        sg.gain.setValueAtTime(0.55, tB1 - 0.15); sg.gain.linearRampToValueAtTime(0, tB1 + 0.05); ss.connect(sg); sg.connect(masterBus); ss.start(tB); ss.stop(tB1 + 0.1); } } catch(e){} }
+  plan.tDrop = tB + R.L * n.beatLen; plan.tFade = T0; plan.tEnd = plan.tDrop + 0.4;   // on garde la main jusqu à B1 (montée au filtre)
+  plan.sortie = `Rewind de ${o.id} + écho, sirène et montée au filtre sur ${R.L} temps (${RW.toFixed(2)} s), ${n.id} lancé ${R.L} temps avant B1 à son tempo · volume ${n.id} ${(20 * Math.log10(R.match)).toFixed(1)} dB`;
+  plan.trickTxt = ''; plan.entree = plan.why;
+}
 function startTransition(dt){
+  if (plan.rewind) return startRewind(dt);
   { const u = [plan.o, plan.n].filter(d => d.item && d.item.bpmWarn); if (u.length) toast(`⚠ Tempo pas sûr sur ${u.map(d => '« ' + d.item.name + ' »').join(' et ')} : l'oreille surveille la vitesse pendant le mix. Vérifie ce son dans l'éditeur après.`, 5000); }
   try { ensureEar(); } catch(e){}
   if (plan.synced) plan.rate = tempoRatio(plan.o, plan.n);   // tempo de A à cet instant précis
@@ -2752,7 +2799,7 @@ function earLag(n, sec, beat){
   return xcorrLag(a, bx, L, 0.001);
 }
 function earCheck(plan, now){
-  const {o, n} = plan; if (plan.manual || !EAR.node || !o.playing || !n.playing) return;
+  const {o, n} = plan; if (plan.rewind || plan.manual || !EAR.node || !o.playing || !n.playing) return;
   const beat = o.beatLen / o.rate;
   const free = now - Math.max(plan.T0, n.nudgeEnd || 0, o.nudgeEnd || 0);   // secondes écoutées depuis le dernier réglage
   if (n.nudging || o.nudging || free < 2.2 || now - (plan.earT || 0) < 1) return;
@@ -3634,6 +3681,7 @@ function updateLcd(){
   if (plan){
     const now = ctx.currentTime, id = `${plan.o.id}→${plan.n.id}`, beat = plan.o.beatLen / plan.o.rate;
     if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = plan.useB2 ? (plan.why ? `Chargé tard : ${plan.n.id} part ${plan.Lp} temps avant B1 → B1 sur B2` : `K de ${plan.n.id} sur K2 de ${plan.o.id} (${plan.Lp} temps) → B1 sur B2`) : plan.why ? `${plan.why} : départ sur un bloc de 32` : `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; }
+    else if (plan.rewind){ a = now < plan.T0 + 1.6 ? `⟲ REWIND ${plan.o.id}` : `${plan.n.id} DROP · B1 DANS ${Math.max(0, Math.ceil((plan.tDrop - now) / (plan.n.beatLen / plan.n.rate)))} T`; b = plan.why; }
     else if (now < plan.tDrop){ a = `${plan.n.id} ENTRE · SWAP DANS ${Math.ceil((plan.tDrop - now) / beat)} T`; b = `${plan.cfx || 'CFX'} · basses ${plan.n.id} coupées`; }
     else if (now < plan.tDrop + 4 * beat){ a = `BASS SWAP → ${plan.n.id}`; b = `Basses ${plan.o.id} coupées net`; }
     else if (now < plan.tFade){ a = `MIX ${id} · LES DEUX ENSEMBLE`; b = `${plan.cutBar ? 'Break de ' + plan.n.id + ' : coupe de ' + plan.o.id : plan.o.id + ' commence à s\'effacer'} dans ${Math.ceil((plan.tFade - now) / beat)} temps`; }

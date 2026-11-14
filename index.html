@@ -117,6 +117,17 @@ button{cursor:pointer}
 .cuebtn:active{transform:scale(.97)}
 .bpmlcd{width:84px;height:50px;border-radius:6px;background:#020607;border:1px solid #000;box-shadow:inset 0 0 0 2px #1d2a2c,inset 0 0 14px rgba(0,0,0,.9);
   display:grid;place-items:center;align-content:center;gap:1px;font-family:var(--font-lcd);color:#20e6e8;text-shadow:0 0 6px rgba(32,230,232,.8)}
+.bpmlcd{cursor:pointer;touch-action:manipulation}.bpmlcd small.on{color:#ffb547;letter-spacing:.08em}
+#pitchpop{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:60;width:min(560px,calc(100vw - 32px));background:#071012;border:1px solid #20e6e8;border-radius:12px;padding:12px 14px 14px;box-shadow:0 10px 40px rgba(0,0,0,.8);color:#cfe;font-family:var(--font-lcd)}
+#pitchpop[hidden]{display:none}
+#pitchpop .ph{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+#pitchpop .ph b{font-size:30px;color:#20e6e8;text-shadow:0 0 8px rgba(32,230,232,.6)}#pitchpop .ph em{font-style:normal;font-size:18px;color:#ffb547}
+#pitchpop .ph span{font-size:11px;letter-spacing:.2em;color:#6fa}
+#pitchpop input[type=range]{width:100%;height:44px;margin:8px 0;accent-color:#20e6e8}
+#pitchpop .pb{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+#pitchpop .pb button{height:46px;border-radius:8px;border:1px solid #000;background:#16262a;color:#dff;font-size:15px;touch-action:manipulation}
+#pitchpop .pb button:active{background:#20e6e8;color:#000}
+#pitchpop .pn{font-size:11px;color:#7aa;margin-top:8px;line-height:1.35;font-family:system-ui,sans-serif}
 .bpmlcd span{font-size:21px;line-height:1}.bpmlcd small{font-size:9px;letter-spacing:.25em;color:#5d8d91;text-shadow:none}
 .bsync{width:84px;height:62px;border-radius:7px;position:relative;border:1px solid #000;padding:10px 0 0;touch-action:manipulation;cursor:pointer;
   background:linear-gradient(#30363a,#181c1e);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 3px 7px rgba(0,0,0,.65);
@@ -960,7 +971,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 101</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 102</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -987,6 +998,12 @@ body[data-skin="psy"] .bline{visibility:hidden}
 
   <input type="file" id="pad-file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" hidden>
   <div class="toast" id="toast" hidden></div>
+  <div id="pitchpop" hidden role="dialog" aria-label="Tempo">
+    <div class="ph"><span id="pp-name">TEMPO A</span><b id="pp-bpm">—</b><em id="pp-pct">0.00 %</em></div>
+    <input type="range" id="pp-range" min="-12" max="12" step="0.05" value="0" aria-label="Pitch en %">
+    <div class="pb"><button data-pp="-1">−1</button><button data-pp="-0.1">−0,1</button><button data-pp="0">0 %</button><button data-pp="0.1">+0,1</button><button data-pp="1">+1</button><button data-pp="x">OK</button></div>
+    <div class="pn" id="pp-note">Les boutons changent le BPM de ±1 ou ±0,1. Le son qui suit se cale sur ce tempo. Comme sur une platine vinyle, le son monte ou descend un peu avec la vitesse.</div>
+  </div>
 </div>
 </div></div>
 
@@ -1880,7 +1897,7 @@ function panelMarkup(id){
           <ol class="qlist" id="${id}-qlist"></ol>
         </div>
         <div class="synccol">
-          <div class="bpmlcd"><span id="${id}-bpm">—</span><small>BPM</small></div>
+          <div class="bpmlcd" id="${id}-bpmbox" role="button" aria-label="Tempo / pitch de la platine ${id}"><span id="${id}-bpm">—</span><small id="${id}-pct">BPM ±</small></div>
           <button class="bsync" id="${id}-sync" aria-label="Synchroniser le BPM sur l'autre platine"><i class="led"></i><b>BEAT</b><b>SYNC</b></button>
           <div class="fine"><button id="${id}-fm" aria-label="Calage fin : ce son est en avance, le retenir de 2 ms">◀</button><button id="${id}-fp" aria-label="Calage fin : ce son est en retard, l'avancer de 2 ms">▶</button></div>
         </div>
@@ -1983,6 +2000,7 @@ function bindDeck(d){
     d.unload();
   });
   d.ui.sync.addEventListener('click', () => syncDeck(d));
+  $(`${id}-bpmbox`).addEventListener('click', () => pitchOpen(d));
   // Calage fin à l'oreille (comme toucher le jog) : 2 ms par appui, en douceur (0,3 % de vitesse, inaudible).
   // Retenu avec le morceau : aux prochains mix, son point de basse est calé avec cette correction.
   const fine = sg => { if (!d.playing || !d.item || d.nudging) return; const x = sg * 0.002;
@@ -2089,6 +2107,28 @@ function autoSyncIdle(d){
   if (d.playing || !d.buffer || !d.bpm || !o.playing || !o.bpm) return;
   const r = tempoRatio(o, d); if (Math.abs(r - 1) <= 0.16 && Math.abs(d.rate - r) > 1e-9) d.setRate(r);
 }
+// ===== Pitch / tempo réglable (fenêtre qui s'ouvre en touchant l'écran BPM : rien ne rétrécit sur la console)
+const PP = {d: null};
+function pitchOpen(d){ if (!d.buffer || !d.bpm){ toast('Charge un morceau sur la platine d\'abord.'); return; } PP.d = d; $('pitchpop').hidden = false; pitchShow(); }
+function pitchShow(){ const d = PP.d; if (!d) return; const r = d.nudging ? d.nudgeBase : d.rate, pc = (r - 1) * 100;
+  $('pp-name').textContent = `TEMPO ${d.id}`; $('pp-bpm').textContent = (d.bpm * r).toFixed(2); $('pp-pct').textContent = `${pc >= 0 ? '+' : ''}${pc.toFixed(2)} %`;
+  $('pp-range').value = pc.toFixed(2); }
+function pitchSet(rate){
+  const d = PP.d; if (!d || !d.bpm) return; const o = other(d);
+  if (plan && plan.scheduled){ toast('Pendant un mix, le tempo se règle après la fin du mix.'); pitchShow(); return; }
+  if (!d.playing && o.playing){ toast(`Le tempo se règle sur la platine qui joue (${o.id}) : celle-ci la suit.`); pitchShow(); return; }
+  if (d.nudging || o.nudging){ setTimeout(() => pitchSet(rate), 250); return; }
+  rate = Math.min(1.16, Math.max(0.84, rate)); const f = rate / d.rate; if (Math.abs(f - 1) < 1e-7) return;
+  const wasSynced = o.playing && o.bpm && Math.abs(o.bpm * o.rate - d.bpm * d.rate) < 0.05;
+  const t = d.setRate(rate);
+  if (wasSynced) o.setRate(o.rate * f, t);      // l'autre platine calée suit, au même instant (reste en phase)
+  autoSyncIdle(o); replanIfNeeded(); pitchShow();
+}
+{ const r = $('pp-range'); r.addEventListener('input', () => pitchSet(1 + parseFloat(r.value) / 100));
+  document.querySelectorAll('[data-pp]').forEach(b => b.addEventListener('click', () => { const d = PP.d, v = b.dataset.pp; if (!d) return;
+    if (v === 'x'){ $('pitchpop').hidden = true; return; }
+    if (v === '0') return pitchSet(1);
+    const cur = d.bpm * (d.nudging ? d.nudgeBase : d.rate); pitchSet((cur + parseFloat(v)) / d.bpm); })); }
 function syncDeck(d){
   const o = other(d);
   if (!d.buffer || !o.buffer || !d.bpm || !o.bpm){ toast('Charge un morceau sur les deux platines pour synchroniser.'); return; }
@@ -3915,6 +3955,8 @@ function frame(now){
     d.ui.time.textContent = has ? '-' + fmt(d.duration - d.pos()) : '';
     setText(d.ui.fname, d.loading || (has ? d.item.name : 'Aucun morceau'));
     setText(d.ui.bpm, d.bpm ? (d.bpm * (d.nudging ? d.nudgeBase : d.rate)).toFixed(2) : '—');
+    { const pe = $(`${d.id}-pct`), r = d.nudging ? d.nudgeBase : d.rate, pc = (r - 1) * 100, on = d.bpm && Math.abs(pc) >= 0.05;
+      const txt = on ? `${pc > 0 ? '+' : ''}${pc.toFixed(1)}%` : 'BPM ±'; if (pe.textContent !== txt){ pe.textContent = txt; pe.classList.toggle('on', !!on); } }
     const o = other(d);
     d.ui.sync.classList.toggle('lit', !!(d.bpm && o.bpm && Math.abs(d.bpm * d.rate - o.bpm * o.rate) < 0.05));
     const pl = d.ui.play, on = d.playing;

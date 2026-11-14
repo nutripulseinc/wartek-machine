@@ -971,7 +971,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 102</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 103</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2255,6 +2255,14 @@ function barKick(t){
     k.push(acc / 4); }
   return k;
 }
+// Niveau RÉEL des graves (sous ~150 Hz, gain de niveau du morceau compris) entre t0 et t1 : pour comparer deux sons entre eux
+function lowLevel(t, t0, t1){
+  try { const b = t.buffer, sr = b.sampleRate, i0 = Math.max(0, Math.floor(t0 * sr)), i1 = Math.min(b.length, Math.floor(t1 * sr));
+    if (i1 - i0 < sr) return null; const L = b.getChannelData(0), R = b.numberOfChannels > 1 ? b.getChannelData(1) : L;
+    const a = 1 - Math.exp(-2 * Math.PI * 150 / sr); let y1 = 0, y2 = 0, acc = 0;
+    for (let i = i0; i < i1; i++){ y1 += a * ((L[i] + R[i]) * 0.5 - y1); y2 += a * (y1 - y2); acc += y2 * y2; }
+    return Math.sqrt(acc / (i1 - i0)) * (t.gainTrim ?? 1); } catch(e){ return null; }
+}
 function barEnergy(t){
   if (t.barE) return t.barE;
   const beat = 60 / t.bpm, nb = Math.floor((t.buffer.duration - t.firstBeat) / (4 * beat)), lo = t.peaks.lo, e = [];
@@ -2368,6 +2376,15 @@ function makePlan(o, n){
       if (ok){ cutBar = k; break; }
     } }
   const stopBars = cutBar != null ? cutBar : cutBars + tailBars;
+  // B1 du son qui entre nettement moins fort que la basse de A (B2) ? Alors A GARDE sa basse au drop (une des deux basses
+  // doit toujours taper) et le swap des basses attend que B ait une vraie grosse basse (par blocs de 16 temps), au plus tard C.
+  let swapBeats = 0, weakTxt = '';
+  const bDropT = bStart + I * nb;
+  if (synced && I > 0){ const eA = lowLevel(o.item, P, P + 16 * ob), eB1 = lowLevel(n.item, bDropT, bDropT + 16 * nb);
+    if (eA && eB1 != null && eB1 < 0.6 * eA){
+      const maxB = Math.floor(cutBars * 4 / 16 + 1e-6) * 16; swapBeats = maxB;
+      for (let k = 16; k < maxB; k += 16){ const e = lowLevel(n.item, bDropT + k * nb, bDropT + (k + 16) * nb); if (e != null && e >= 0.75 * eA){ swapBeats = k; break; } }
+      weakTxt = `basse de B1 (${n.id}) ${Math.round(20 * Math.log10(eB1 / eA))} dB sous celle de ${o.id} : ${o.id} garde sa basse, swap ${swapBeats ? swapBeats + ' temps après B1' : 'à B1 quand même'}`; } }
   // Trick DJ : à la petite coupure de fin des 32 premiers temps ensemble, on laisse A seul (voir startTransition)
   // Deux tricks possibles : fin des 32 premiers temps ensemble, puis fin des 32 suivants (temps 33 à 64)
   const trick = [];
@@ -2375,9 +2392,9 @@ function makePlan(o, n){
     const end = 32 * (k + 1);
     if (cutBars * 4 < (k ? end : end + 4) || (cutBar != null && cutBar * 4 < end + 4)) break;
     const qB = fillStart(n.item, sn.drop + k * 32 * nb, nb), qA = fillStart(o.item, P + k * 32 * ob, ob), q = qB ?? qA;
-    if (q != null) trick.push({q: q + k * 32, end, from: qB != null ? n.id : o.id});
+    if (q != null && end > swapBeats + 4) trick.push({q: q + k * 32, end, from: qB != null ? n.id : o.id});
   }
-  return {snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+  return {swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + stopBars * 4 + 8, trick, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
@@ -2469,10 +2486,11 @@ function startTransition(dt){
     if (i % 4 === 0){ schedule(n, 'mid', Math.round(-9 + 8 * f), t, 0.08); schedule(n, 'hi', Math.round(-5 + 5 * f), t, 0.08); schedule(o, 'hi', Math.round(-4 * f), t, 0.08); }
   }
   // Bass swap : sur le temps fort, basses de A coupées net et basses de B libérées, instantanément
-  schedule(n, 'lo', 0, tDrop, 0.002); schedule(o, 'lo', -26, tDrop, 0.002);
+  const tSwap = tDrop + (plan.swapBeats || 0) * beat;   // = tDrop, sauf si B1 est trop faible : A garde sa basse jusque-là
+  schedule(n, 'lo', 0, tSwap, 0.002); schedule(o, 'lo', -26, tSwap, 0.002);
   // Les deux kicks hardstyle se superposent : leurs harmoniques (300-600 Hz) au même niveau « battent » entre elles → le son vacille.
   // Pendant B1 sur B2, la coupure des basses de A monte de 220 à 320 Hz : son kick s'efface vraiment, ses aigus / mélodie restent.
-  o.lo.frequency.setValueAtTime(320, Math.max(ctx.currentTime, tDrop - 0.01));
+  o.lo.frequency.setValueAtTime(320, Math.max(ctx.currentTime, tSwap - 0.01));
   schedule(n, 'vol', 100, tDrop, 0.02); schedule(n, 'mid', 0, tDrop, 0.02); schedule(n, 'hi', 0, tDrop, 0.02);
   const bar = 4 * beat, st = plan.style[0], pre8 = Math.max(now + 0.05, tDrop - 8 * beat), n8 = Math.round((tDrop - pre8) / beat);
   // Coup de CFX sur A à chaque transition, sur ses 8 derniers temps : un mix sur deux dans les aigus (passe-haut),
@@ -2481,11 +2499,11 @@ function startTransition(dt){
   const cfx = mixCount % 2 === 0 ? 1 : -1, longMix = L >= 32, span = longMix ? 16 : 4;
   plan.cfx = `CFX ${longMix ? 'long' : 'court'} · ${cfx > 0 ? 'aigus' : 'graves'}`;
   mixCount++;
-  const c0 = Math.max(now + 0.05, tDrop - span * beat), cn = Math.round((tDrop - c0) / beat);
+  const c0 = Math.max(now + 0.05, tSwap - span * beat), cn = Math.round((tSwap - c0) / beat);
   // 32 premiers temps de B1 sur B2 : CFX tout léger (on entend vraiment les deux sons ensemble), puis CFX normal jusqu'à C
   const cfxLight = Math.round(cfx * (cfx > 0 ? 20 : 18)), cfxFull = Math.round(cfx * (cfx > 0 ? 45 : 40));
   for (let i = 1; i <= cn; i++) schedule(o, 'filt', Math.round(cfxLight * Math.pow(i / cn, 1.4)), c0 + i * beat, longMix ? 0.08 : 0.04);
-  if (plan.synced && plan.cutBars * 4 > 33 && !(plan.trick || []).some(tk => tk.end === 32)) for (let i = 1; i <= 4; i++) schedule(o, 'filt', Math.round(cfxLight + (cfxFull - cfxLight) * i / 4), tDrop + (31 + i) * beat, 0.08);
+  if (plan.synced && !plan.swapBeats && plan.cutBars * 4 > 33 && !(plan.trick || []).some(tk => tk.end === 32)) for (let i = 1; i <= 4; i++) schedule(o, 'filt', Math.round(cfxLight + (cfxFull - cfxLight) * i / 4), tDrop + (31 + i) * beat, 0.08);
   // Du swap (B2) jusqu'à C : A reste comme il est (basses coupées, CFX léger du swap), pas de changement.
   if (st === 'flanger'){
     for (let i = 0; i <= n8; i += 2) schedule(o, 'fx', {name: 'flanger', amt: 0.1 + 0.55 * i / Math.max(1, n8)}, pre8 + i * beat, 0.25);
@@ -2572,7 +2590,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
     basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, verrou_kicks: t.lockInfo || null, tempo_peigne: t.combInfo || null, nettete_tempo: t.combConf != null ? +t.combConf.toFixed(2) : null, grille_a_verifier: t.gridWarn || null, bpm_a_verifier: t.bpmWarn || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
-    grille_locale: p.local || null, calage_basses_ms: p.snap || null, calage_fin_touches: p.fineLog || [], oreille_ms: p.earLog || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
+    grille_locale: p.local || null, calage_basses_ms: p.snap || null, calage_fin_touches: p.fineLog || [], oreille_ms: p.earLog || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', basse_faible: p.weakTxt || null, trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
   if (DIAG.length > 6) DIAG.shift();
 }
 function finishTransition(){

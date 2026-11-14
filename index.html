@@ -971,7 +971,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 103</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 104</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1687,7 +1687,7 @@ class Deck {
     this.pause();
     this.item = item; this.buffer = item.buffer; this.bpm = item.bpm; this.firstBeat = item.firstBeat || 0;
     if (item.gainTrim == null && item.buffer){ const lv = levelTrim(item.buffer); item.gainTrim = lv.trim; item.lvlInfo = lv; }
-    this.trimG.gain.setValueAtTime(item.gainTrim ?? 1, ctx.currentTime);
+    item.mixTrim = 1; this.trimG.gain.setValueAtTime(item.gainTrim ?? 1, ctx.currentTime);
     if (!item.peaks) item.peaks = computePeaks(item.buffer);
     this.peaks = item.peaks; structureOf(item);
     this.offset = 0; this.cue = item.start ?? this.firstBeat; this.rate = 1; this.overDirty = true; this.applyFx();
@@ -2261,7 +2261,14 @@ function lowLevel(t, t0, t1){
     if (i1 - i0 < sr) return null; const L = b.getChannelData(0), R = b.numberOfChannels > 1 ? b.getChannelData(1) : L;
     const a = 1 - Math.exp(-2 * Math.PI * 150 / sr); let y1 = 0, y2 = 0, acc = 0;
     for (let i = i0; i < i1; i++){ y1 += a * ((L[i] + R[i]) * 0.5 - y1); y2 += a * (y1 - y2); acc += y2 * y2; }
-    return Math.sqrt(acc / (i1 - i0)) * (t.gainTrim ?? 1); } catch(e){ return null; }
+    return Math.sqrt(acc / (i1 - i0)) * (t.gainTrim ?? 1) * (t.mixTrim ?? 1); } catch(e){ return null; }
+}
+// Niveau RÉEL (toutes fréquences, gain du morceau compris) entre t0 et t1
+function fullLevel(t, t0, t1){
+  try { const b = t.buffer, sr = b.sampleRate, i0 = Math.max(0, Math.floor(t0 * sr)), i1 = Math.min(b.length, Math.floor(t1 * sr));
+    if (i1 - i0 < sr) return null; const L = b.getChannelData(0), R = b.numberOfChannels > 1 ? b.getChannelData(1) : L; let acc = 0, c = 0;
+    for (let i = i0; i < i1; i += 3){ const v = (L[i] + R[i]) * 0.5; acc += v * v; c++; }
+    return Math.sqrt(acc / c) * (t.gainTrim ?? 1) * (t.mixTrim ?? 1); } catch(e){ return null; }
 }
 function barEnergy(t){
   if (t.barE) return t.barE;
@@ -2328,7 +2335,12 @@ function makePlan(o, n){
   const unsure = [o, n].filter(d => d.item && d.item.bpmWarn).map(d => d.id);
   if (!synced) why = 'Tempos trop éloignés';
   else if (so.lastBass == null) why = `Pas de B2 trouvé sur ${o.id}`;
-  else if (so.lastBass - Ifull * ob < pos + lead) why = 'K2 déjà passé';
+  else if (so.lastBass - Ifull * ob < pos + lead){
+    // Chargé tard : K2 déjà passé. On lance B plus loin dans son intro (pas sur K1), d'un nombre de temps multiple de 8
+    // (32, 24, 16 ou 8 temps avant B1) : K1 et K2 se décalent ensemble, B1 tombe quand même pile sur B2.
+    const room = Math.floor((so.lastBass - pos - lead) / ob), Ilate = Math.min(Math.floor(room / 8) * 8, Math.floor(Ifull / 8) * 8);
+    if (Ilate >= 8 && so.lastBass <= E - 4 * ob){ aStart = so.lastBass - Ilate * ob; I = Ilate; useB2 = true; why = `chargé tard : B lancé ${Ilate} temps avant B1 (pas sur K1), B1 toujours sur B2`; }
+    else why = 'K2 déjà passé'; }
   else if (so.lastBass > E - 4 * ob) why = `B2 trop près de la fin de ${o.id}`;
   else { aStart = so.lastBass - Ifull * ob; I = Ifull; useB2 = true; }
   if (!useB2){
@@ -2394,7 +2406,16 @@ function makePlan(o, n){
     const qB = fillStart(n.item, sn.drop + k * 32 * nb, nb), qA = fillStart(o.item, P + k * 32 * ob, ob), q = qB ?? qA;
     if (q != null && end > swapBeats + 4) trick.push({q: q + k * 32, end, from: qB != null ? n.id : o.id});
   }
-  return {swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+  // Volume adapté : le son qui entre est mis au MÊME niveau que celui qui sort (comparé sur B2 de A et B1 de B), ±3 dB au plus
+  let match = 1, matchTxt = '';
+  if (synced && I > 0 && !swapBeats){ const la = fullLevel(o.item, P, P + 16 * ob), lb = fullLevel(n.item, bDropT, bDropT + 16 * nb);
+    if (la && lb){ match = clamp(la / lb, 0.71, 1.41); const db = 20 * Math.log10(match); if (Math.abs(db) >= 0.8) matchTxt = `${n.id} ${db > 0 ? 'monté' : 'baissé'} de ${Math.abs(db).toFixed(1)} dB pour être au niveau de ${o.id}`; else match = 1; } }
+  // Un peu de basse de A gardée au swap SEULEMENT si B tape ses basses sans coupure sur les 32 premiers temps :
+  // si B coupe net ses basses (même 1 mesure), A est coupé net aussi (pas de basse de A qui traîne dans le trou)
+  let keepLo = false;
+  if (synced && I > 0 && !swapBeats){ const bars = []; for (let k = 0; k < 8; k++) bars.push(lowLevel(n.item, bDropT + k * 4 * nb, bDropT + (k + 1) * 4 * nb) || 0);
+    const avg = bars.reduce((a, b) => a + b, 0) / 8; let kb = 0; while (kb < 8 && avg > 0 && bars[kb] >= 0.4 * avg) kb++; keepLo = kb >= 2 ? kb : false; }
+  return {keepLo, match, matchTxt, swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + stopBars * 4 + 8, trick, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
@@ -2487,7 +2508,14 @@ function startTransition(dt){
   }
   // Bass swap : sur le temps fort, basses de A coupées net et basses de B libérées, instantanément
   const tSwap = tDrop + (plan.swapBeats || 0) * beat;   // = tDrop, sauf si B1 est trop faible : A garde sa basse jusque-là
-  schedule(n, 'lo', 0, tSwap, 0.002); schedule(o, 'lo', -26, tSwap, 0.002);
+  // Bien calé (B1 et B2 lus au kick) : A garde un peu de basse au swap (-14 dB), qui descend en 32 temps → transition plus pleine, pas de trou
+  const keepLo = plan.keepLo && plan.synced && !plan.swapBeats && plan.snap && plan.snap.B2_sort_ms != null && plan.snap.B1_entre_ms != null;
+  schedule(n, 'lo', 0, tSwap, 0.002); schedule(o, 'lo', keepLo ? -14 : -26, tSwap, 0.002);
+  if (keepLo){ const kb = plan.keepLo * 4;   // jusqu'à la 1re coupure de basse de B (au plus 32 temps), puis A coupé net
+    if (kb > 16) schedule(o, 'lo', -20, tSwap + 16 * beat, 0.3);
+    schedule(o, 'lo', -26, tSwap + kb * beat - 0.01, 0.002); }
+  // Volume adapté : B mis au niveau de A (mesuré avant le mix), en douceur pendant l'intro
+  if (plan.match && plan.match !== 1){ n.item.mixTrim = plan.match; n.trimG.gain.setTargetAtTime((n.item.gainTrim ?? 1) * plan.match, now + 0.05, 0.5); }
   // Les deux kicks hardstyle se superposent : leurs harmoniques (300-600 Hz) au même niveau « battent » entre elles → le son vacille.
   // Pendant B1 sur B2, la coupure des basses de A monte de 220 à 320 Hz : son kick s'efface vraiment, ses aigus / mélodie restent.
   o.lo.frequency.setValueAtTime(320, Math.max(ctx.currentTime, tSwap - 0.01));
@@ -2590,7 +2618,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
     basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, verrou_kicks: t.lockInfo || null, tempo_peigne: t.combInfo || null, nettete_tempo: t.combConf != null ? +t.combConf.toFixed(2) : null, grille_a_verifier: t.gridWarn || null, bpm_a_verifier: t.bpmWarn || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
-    grille_locale: p.local || null, calage_basses_ms: p.snap || null, calage_fin_touches: p.fineLog || [], oreille_ms: p.earLog || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', basse_faible: p.weakTxt || null, trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
+    grille_locale: p.local || null, calage_basses_ms: p.snap || null, calage_fin_touches: p.fineLog || [], oreille_ms: p.earLog || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', basse_faible: p.weakTxt || null, volume_adapte: p.matchTxt || null, basse_A_gardee_temps: p.keepLo ? p.keepLo * 4 : 0, depart: p.why || null, trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
   if (DIAG.length > 6) DIAG.shift();
 }
 function finishTransition(){
@@ -3579,7 +3607,7 @@ function updateLcd(){
   const cur = Object.values(decks).find(d => d.playing && d.t0 <= ctx.currentTime);
   if (plan){
     const now = ctx.currentTime, id = `${plan.o.id}→${plan.n.id}`, beat = plan.o.beatLen / plan.o.rate;
-    if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = plan.useB2 ? `K de ${plan.n.id} sur K2 de ${plan.o.id} (${plan.Lp} temps) → B1 sur B2` : plan.why ? `${plan.why} : départ sur un bloc de 32` : `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; }
+    if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = plan.useB2 ? (plan.why ? `Chargé tard : ${plan.n.id} part ${plan.Lp} temps avant B1 → B1 sur B2` : `K de ${plan.n.id} sur K2 de ${plan.o.id} (${plan.Lp} temps) → B1 sur B2`) : plan.why ? `${plan.why} : départ sur un bloc de 32` : `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; }
     else if (now < plan.tDrop){ a = `${plan.n.id} ENTRE · SWAP DANS ${Math.ceil((plan.tDrop - now) / beat)} T`; b = `${plan.cfx || 'CFX'} · basses ${plan.n.id} coupées`; }
     else if (now < plan.tDrop + 4 * beat){ a = `BASS SWAP → ${plan.n.id}`; b = `Basses ${plan.o.id} coupées net`; }
     else if (now < plan.tFade){ a = `MIX ${id} · LES DEUX ENSEMBLE`; b = `${plan.cutBar ? 'Break de ' + plan.n.id + ' : coupe de ' + plan.o.id : plan.o.id + ' commence à s\'effacer'} dans ${Math.ceil((plan.tFade - now) / beat)} temps`; }

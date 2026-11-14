@@ -960,7 +960,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 100</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 101</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2152,6 +2152,7 @@ function fxAt(d, v, t, tc = 0.05){
 }
 function restoreDeck(d){
   const now = ctx.currentTime;
+  try { d.lo.frequency.cancelScheduledValues(now); d.lo.frequency.setValueAtTime(220, now); } catch(e){}
   [d.gate.gain, d.input.gain].forEach(g => { g.cancelScheduledValues(now); g.setTargetAtTime(1, now, 0.01); });
   fxAt(d, {name: 'none'}, now, 0.02); d.applyFx();
 }
@@ -2429,6 +2430,9 @@ function startTransition(dt){
   }
   // Bass swap : sur le temps fort, basses de A coupées net et basses de B libérées, instantanément
   schedule(n, 'lo', 0, tDrop, 0.002); schedule(o, 'lo', -26, tDrop, 0.002);
+  // Les deux kicks hardstyle se superposent : leurs harmoniques (300-600 Hz) au même niveau « battent » entre elles → le son vacille.
+  // Pendant B1 sur B2, la coupure des basses de A monte de 220 à 320 Hz : son kick s'efface vraiment, ses aigus / mélodie restent.
+  o.lo.frequency.setValueAtTime(320, Math.max(ctx.currentTime, tDrop - 0.01));
   schedule(n, 'vol', 100, tDrop, 0.02); schedule(n, 'mid', 0, tDrop, 0.02); schedule(n, 'hi', 0, tDrop, 0.02);
   const bar = 4 * beat, st = plan.style[0], pre8 = Math.max(now + 0.05, tDrop - 8 * beat), n8 = Math.round((tDrop - pre8) / beat);
   // Coup de CFX sur A à chaque transition, sur ses 8 derniers temps : un mix sur deux dans les aigus (passe-haut),

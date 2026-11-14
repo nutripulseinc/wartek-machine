@@ -989,7 +989,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 109</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 110</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -3234,8 +3234,37 @@ function visFrame(){
   setText($('viss'), $('ml1').textContent);
   VIS.raf = requestAnimationFrame(visFrame);
 }
+// ===== Habillage hors mix : sur le son qui joue seul, entre son B1 et le K2 du prochain mix (ou son B2),
+// un effet court sur la fin de certains blocs de 32 temps (roll, phaser, flanger, filtre, écho, montée au CFX).
+// Tiré au hasard, environ un bloc sur deux, jamais deux fois le même d'affilée, jamais si un effet est déjà mis à la main.
+const SOLO = {key: null, last: ''};
+function soloFx(){
+  if (!auto || (plan && plan.scheduled)) return;
+  const playing = Object.values(decks).filter(d => d.playing); if (playing.length !== 1) return;
+  const d = playing[0], t = d.item; if (!t || !d.bpm || d.fxAmt > 0 || d.nudging) return;
+  let st; try { st = structureOf(t); } catch(e){ return; } if (!st || st.drop == null) return;
+  const T = d.beatLen, pos = d.pos(), b1 = st.drop, now = ctx.currentTime;
+  if (pos < b1 - 4 * T) return;
+  const lim = plan && plan.o === d ? plan.oldStart - 2 * T : (st.lastBass ?? Infinity) - 2 * T;
+  const k = Math.ceil((pos - b1 + 4 * T + 0.4 * d.rate) / (32 * T)); if (k < 1) return;
+  const E = b1 + k * 32 * T, key = (t.id || t.name) + '|' + k; if (SOLO.key === key || E > lim) return;
+  if ((E - 4 * T - pos) / d.rate > 1.5) return;   // on décide ~1 s avant la fenêtre (4 derniers temps du bloc)
+  SOLO.key = key; if (Math.random() < 0.45) return;   // pas à chaque fois : ça habille sans saouler
+  const opts = ['roll', 'phaser', 'flanger', 'filter', 'echo', 'sweep'].filter(x => x !== SOLO.last), fx = opts[Math.floor(Math.random() * opts.length)]; SOLO.last = fx;
+  const at = x => now + (x - pos) / d.rate, tE = at(E), bt = T / d.rate;
+  if (fx === 'roll'){ const half = Math.random() < 0.5; fxAt(d, {name: 'roll', div: half ? 0.5 : 0.25, amt: 1}, at(E - (half ? 2 : 1) * T), 0.01); }
+  else if (fx === 'phaser') fxAt(d, {name: 'phaser', amt: 0.65, rate: 1.2}, at(E - 4 * T), 0.3);
+  else if (fx === 'flanger') fxAt(d, {name: 'flanger', amt: 0.55}, at(E - 4 * T), 0.3);
+  else if (fx === 'filter') fxAt(d, {name: 'filter', amt: 0.7, rate: 2 * d.bpm * d.rate / 60 / 4}, at(E - 4 * T), 0.2);
+  else if (fx === 'echo') fxAt(d, {name: 'echo', amt: 0.6, rate: 0.75, fb: 0.5}, at(E - 1 * T), 0.02);
+  else { for (let i = 0; i < 4; i++) paramAt(d, 'filt', Math.round(10 + 9 * i), at(E - (4 - i) * T), 0.2); paramAt(d, 'filt', 0, tE, 0.01); setTimeout(() => d.ctl.filt.set(0, false), (tE - ctx.currentTime) * 1000 + 50); }
+  if (fx !== 'sweep'){ fxAt(d, {name: 'none'}, fx === 'echo' ? tE + bt : tE, 0.02);
+    setTimeout(() => { if (!(plan && plan.scheduled)) d.applyFx(); }, ((fx === 'echo' ? tE + bt : tE) - ctx.currentTime) * 1000 + 80); }
+  lockInfo = {t: tE - 4 * bt, txt: `FX ${fx.toUpperCase()} · fin du bloc`};
+}
 function autoTick(){
   autoSyncIdle(decks.A); autoSyncIdle(decks.B);
+  try { soloFx(); } catch(e){}
   if (waitFree && !waitFree.free.playing){ const w = waitFree; waitFree = null; if (auto) queueNext(w.cur, w.free); }
   if (!plan) return;
   const {o, n} = plan, now = ctx.currentTime;

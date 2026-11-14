@@ -990,7 +990,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 113</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 114</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2445,7 +2445,7 @@ function makePlan(o, n){
   let stopBars = cutBar != null ? cutBar : cutBars + tailBars;
   // B1 du son qui entre nettement moins fort que la basse de A (B2) ? Alors A GARDE sa basse au drop (une des deux basses
   // doit toujours taper) et le swap des basses attend que B ait une vraie grosse basse (par blocs de 16 temps), au plus tard C.
-  let swapBeats = 0, weakTxt = '';
+  let swapBeats = 0, weakTxt = '', weakLo = null;
   const bDropT = bStart + I * nb;
   if (synced && I > 0){ const eA = lowLevel(o.item, P, P + 16 * ob), eB1 = lowLevel(n.item, bDropT, bDropT + 16 * nb), eB8 = lowLevel(n.item, bDropT, bDropT + 8 * nb);
     // B1 sans vraie basse (voix, montée…) : soit faible en moyenne, soit quasi rien sur ses 8 premiers temps
@@ -2455,7 +2455,9 @@ function makePlan(o, n){
       // on cherche la vraie basse de B jusqu'à la fin de la sortie de A (F), pas seulement jusqu'à C : A tient la basse tant qu'il faut
       const maxB = Math.max(4, Math.floor((cutBars + tailBars) * 4 / 4 + 1e-6) * 4); swapBeats = maxB;
       for (let k = 4; k < maxB; k += 4){ const e = lowLevel(n.item, bDropT + k * nb, bDropT + (k + 8) * nb); if (e != null && e >= 0.7 * eA){ swapBeats = k; break; } }
-      weakTxt = `B1 de ${n.id} sans vraie basse (${Math.round(20 * Math.log10(Math.max(1e-6, Math.min(eB1, eB8 ?? eB1)) / eA))} dB) : ${o.id} garde basses, médiums et aigus, relais des basses ${swapBeats} temps après B1${swapBeats >= maxB ? ' (fin de la sortie de ' + o.id + ')' : ' (B tape sa basse)'}`; } }
+      // ses basses à lui (faibles) sont ouvertes en partie dès B1 : plus elles sont faibles, plus on ouvre (elles ne gênent pas celles de A)
+      { const r = Math.min(1, Math.min(eB1, eB8 ?? eB1) / (0.6 * eA)); weakLo = Math.round(-4 - 14 * r); }
+      weakTxt = `B1 de ${n.id} sans vraie basse (${Math.round(20 * Math.log10(Math.max(1e-6, Math.min(eB1, eB8 ?? eB1)) / eA))} dB) : ${o.id} garde basses, médiums et aigus, basses de ${n.id} à ${weakLo} dB dès B1, relais complet ${swapBeats} temps après B1${swapBeats >= maxB ? ' (fin de la sortie de ' + o.id + ')' : ' (B tape sa basse)'}`; } }
       // la « coupure » vue dans B avant qu'il ait sa basse, c'est sa montée : on ne coupe PAS A net là-dessus.
       // Un vrai break (A coupé net) ne compte qu'APRÈS le relais des basses, quand B a tapé puis retombe (boom / down).
       if (cutBar != null && cutBar * 4 < swapBeats + 8){ cutBar = null;
@@ -2491,7 +2493,7 @@ function makePlan(o, n){
       eq = {bLo: r1(clamp((ra.lo - rb.lo) * 0.5, -3, 3)), bMid: r1(clamp((ra.mid - rb.mid) * 0.5, -3, 3)), bHi: r1(clamp((ra.hi - rb.hi) * 0.5, -3, 3)),
             aMid: r1(clamp(-2 - (A.mid - B.mid) * 0.6, -8, 0)), aHi: r1(clamp(-2 - (A.hi - B.hi) * 0.6, -8, 0))};
       eq.txt = `${n.id} : graves ${eq.bLo >= 0 ? '+' : ''}${eq.bLo}, médiums ${eq.bMid >= 0 ? '+' : ''}${eq.bMid}, aigus ${eq.bHi >= 0 ? '+' : ''}${eq.bHi} dB · ${o.id} pendant B1/B2 : médiums ${eq.aMid}, aigus ${eq.aHi} dB`; } }
-  return {rewind, eq, keepLo, match, matchTxt, swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+  return {weakLo, rewind, eq, keepLo, match, matchTxt, swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + stopBars * 4 + 8, trick, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
@@ -2625,6 +2627,7 @@ function startTransition(dt){
   const tSwap = tDrop + (plan.swapBeats || 0) * beat;   // = tDrop, sauf si B1 est trop faible : A garde sa basse jusque-là
   // Bien calé (B1 et B2 lus au kick) : A garde un peu de basse au swap (-14 dB), qui descend en 32 temps → transition plus pleine, pas de trou
   const keepLo = plan.keepLo && plan.synced && !plan.swapBeats && plan.snap && plan.snap.B2_sort_ms != null && plan.snap.B1_entre_ms != null;
+  if (plan.swapBeats && plan.weakLo != null) schedule(n, 'lo', plan.weakLo, tDrop, 0.08);   // B1 sans vraie basse : ses basses dosées (pas coupées net) avec celles de A
   schedule(n, 'lo', 0, tSwap, 0.002); schedule(o, 'lo', keepLo ? -14 : -26, tSwap, 0.002);
   if (keepLo){ const kb = plan.keepLo * 4;   // jusqu'à la 1re coupure de basse de B (au plus 32 temps), puis A coupé net
     if (kb > 16) schedule(o, 'lo', -20, tSwap + 16 * beat, 0.3);

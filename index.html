@@ -990,7 +990,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 112</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 113</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2442,7 +2442,7 @@ function makePlan(o, n){
     // si le break détecté tombe 1-2 mesures après un début de bloc de 16 temps et que ça retombe déjà, on coupe A pile sur l'impact
     if (cutBar != null && cutBar % 4){ const b0 = Math.floor(cutBar / 4) * 4;
       if (b0 >= 4 && cutBar - b0 <= 2 && eB[dBar + b0 + 1] != null && eB[dBar + b0 + 1] < 0.75 * refE) cutBar = b0; } }
-  const stopBars = cutBar != null ? cutBar : cutBars + tailBars;
+  let stopBars = cutBar != null ? cutBar : cutBars + tailBars;
   // B1 du son qui entre nettement moins fort que la basse de A (B2) ? Alors A GARDE sa basse au drop (une des deux basses
   // doit toujours taper) et le swap des basses attend que B ait une vraie grosse basse (par blocs de 16 temps), au plus tard C.
   let swapBeats = 0, weakTxt = '';
@@ -2452,9 +2452,18 @@ function makePlan(o, n){
     if (eA && eB1 != null && (eB1 < 0.6 * eA || (eB8 != null && eB8 < 0.45 * eA))){
       // A garde TOUT (basses, médiums, aigus) et habille B ; le relais se fait mesure par mesure, dès que B tape une vraie basse
       // (8 temps d'affilée au niveau), au plus tard à C
-      const maxB = Math.max(4, Math.floor(cutBars * 4 / 4 + 1e-6) * 4); swapBeats = maxB;
+      // on cherche la vraie basse de B jusqu'à la fin de la sortie de A (F), pas seulement jusqu'à C : A tient la basse tant qu'il faut
+      const maxB = Math.max(4, Math.floor((cutBars + tailBars) * 4 / 4 + 1e-6) * 4); swapBeats = maxB;
       for (let k = 4; k < maxB; k += 4){ const e = lowLevel(n.item, bDropT + k * nb, bDropT + (k + 8) * nb); if (e != null && e >= 0.7 * eA){ swapBeats = k; break; } }
-      weakTxt = `B1 de ${n.id} sans vraie basse (${Math.round(20 * Math.log10(Math.max(1e-6, Math.min(eB1, eB8 ?? eB1)) / eA))} dB) : ${o.id} garde basses, médiums et aigus, relais des basses ${swapBeats} temps après B1${swapBeats >= maxB ? ' (à C)' : ' (B tape sa basse)'}`; } }
+      weakTxt = `B1 de ${n.id} sans vraie basse (${Math.round(20 * Math.log10(Math.max(1e-6, Math.min(eB1, eB8 ?? eB1)) / eA))} dB) : ${o.id} garde basses, médiums et aigus, relais des basses ${swapBeats} temps après B1${swapBeats >= maxB ? ' (fin de la sortie de ' + o.id + ')' : ' (B tape sa basse)'}`; } }
+      // la « coupure » vue dans B avant qu'il ait sa basse, c'est sa montée : on ne coupe PAS A net là-dessus.
+      // Un vrai break (A coupé net) ne compte qu'APRÈS le relais des basses, quand B a tapé puis retombe (boom / down).
+      if (cutBar != null && cutBar * 4 < swapBeats + 8){ cutBar = null;
+        const k0 = Math.ceil(swapBeats / 4), ref2 = eB.slice(dBar + k0, dBar + k0 + 4).reduce((a, b) => a + b, 0) / 4;
+        for (let k = k0 + 2; k < cutBars + tailBars && dBar + k + 3 < eB.length && ref2 > 0; k++){
+          let ok = true; for (let q = 0; q < 4; q++) if (eB[dBar + k + q] >= 0.4 * ref2){ ok = false; break; }
+          if (ok){ cutBar = k % 4 && k - Math.floor(k / 4) * 4 <= 2 ? Math.floor(k / 4) * 4 : k; break; } }
+        stopBars = cutBar != null ? cutBar : cutBars + tailBars; }
   // Trick DJ : à la petite coupure de fin des 32 premiers temps ensemble, on laisse A seul (voir startTransition)
   // Deux tricks possibles : fin des 32 premiers temps ensemble, puis fin des 32 suivants (temps 33 à 64)
   const trick = [];
@@ -2664,7 +2673,7 @@ function startTransition(dt){
     for (let s = 1; s <= steps; s++){
       const t = tCut + (s - 1) * 16 * beat, f = s / steps; if (t >= tStop - 0.01) break;
       const tc = Math.min(1.2, beat * 1.5);   // chaque palier glisse sur ~1 temps, pas de saut
-      schedule(o, 'filt', Math.round(fStart + (fEnd - fStart) * f), t, tc);
+      schedule(o, 'filt', t < tSwap - 0.01 ? Math.round(cfx * 14) : Math.round(fStart + (fEnd - fStart) * f), t, tc);   // avant le relais des basses : CFX léger, A garde sa basse
       { const aM = Math.min(0, (plan.eq && plan.eq.aMid) || 0), aH = Math.min(-4, (plan.eq && plan.eq.aHi) || -4);   // part de l'égaliseur adapté, jamais remonté
         schedule(o, 'mid', Math.round(Math.min(aM, aM + (-9 - aM) * f)), t, tc); schedule(o, 'hi', Math.round(Math.min(aH, aH + (-10 - aH) * f)), t, tc); }
     }

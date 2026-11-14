@@ -207,6 +207,7 @@ button{cursor:pointer}
 .fxbtns .fxb{height:31px;font-size:13px!important;padding:0 2px;white-space:nowrap;letter-spacing:0}
 .fxb{height:38px;border-radius:6px;border:1px solid #0a0b0d;background:linear-gradient(#3a3c41,#26282c);font-size:17px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;touch-action:manipulation;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 2px 3px rgba(0,0,0,.5)}
+.fxb.autofx{animation:fxAutoPulse .5s ease-in-out infinite alternate}@keyframes fxAutoPulse{from{box-shadow:0 0 0 2px var(--blue),0 0 10px rgba(46,140,255,.6)}to{box-shadow:0 0 0 2px #fff,0 0 22px rgba(46,140,255,1)}}
 .fxb[aria-pressed="true"]{background:linear-gradient(#1e5bb0,#174a91);box-shadow:0 0 0 2px var(--blue),0 0 14px rgba(46,140,255,.7);color:#fff}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%;justify-items:center}
 
@@ -989,7 +990,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 110</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 111</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -2062,7 +2063,7 @@ function bindDeck(d){
     const s = document.createElement('span'); s.textContent = v;
     s.style.left = `${75 + Math.cos(a) * R}px`; s.style.top = `${75 + Math.sin(a) * R}px`; ticks.appendChild(s);
   }
-  new Ctl(kEl, {min: 0, max: 10, value: 0, color: id === 'A' ? '#20e6e8' : '#ff4fd8', label: `FX amount ${id}`, onChange: v => { d.fxAmt = v / 10; d.applyFx(); }});
+  d.fxAmtCtl = new Ctl(kEl, {min: 0, max: 10, value: 0, color: id === 'A' ? '#20e6e8' : '#ff4fd8', label: `FX amount ${id}`, onChange: v => { d.fxAmt = v / 10; d.applyFx(); }});
   const FX = FX_LIST.map(x => x[0]);
   FX.forEach(name => el(`fx-${name}`).addEventListener('click', () => {
     d.fx = name; d.applyFx();
@@ -2070,12 +2071,26 @@ function bindDeck(d){
     if (d.fxAmt === 0) toast('Tourne FX AMOUNT pour entendre l\'effet.', 2600);
   }));
   const rf = el('rf');
-  knob(rf, 'Rate', 'mid', {min: 0, max: 100, value: 40, color: id === 'A' ? '#20e6e8' : '#ff4fd8',
+  d.fxRateCtl = knob(rf, 'Rate', 'mid', {min: 0, max: 100, value: 40, color: id === 'A' ? '#20e6e8' : '#ff4fd8',
     format: v => d.fx === 'echo' ? `${ECHO_DIV[Math.round(v / 100 * (ECHO_DIV.length - 1))]} T` : SYNCED_FX.includes(d.fx) ? `${SYNC_DIV[Math.round(v / 100 * (SYNC_DIV.length - 1))]} T` : `${Math.round(v)}%`,
     onChange: v => { d.fxRate = v / 100; d.applyFx(); }});
-  knob(rf, 'Feedback', 'mid', {min: 0, max: 100, value: 50, color: id === 'A' ? '#20e6e8' : '#ff4fd8', format: v => `${Math.round(v)}%`,
+  d.fxFbCtl = knob(rf, 'Feedback', 'mid', {min: 0, max: 100, value: 50, color: id === 'A' ? '#20e6e8' : '#ff4fd8', format: v => `${Math.round(v)}%`,
     onChange: v => { d.fxFb = v / 100; d.applyFx(); }});
 
+  // Effets lancés par la machine (Smart Mix, tricks, habillage) : le module FX bouge comme si le DJ le tournait
+  // (bouton de l'effet allumé, FX amount qui monte, Rate et Feedback qui bougent), puis tout revient à ton réglage.
+  d.fxShow = v => {
+    clearInterval(d._fxAnim); d._fxAnim = 0;
+    const nm = v && v.name;
+    if (!nm || nm === 'none' || !(v.amt > 0) || !FX.includes(nm)){
+      FX.forEach(n => { const b = el(`fx-${n}`); b.setAttribute('aria-pressed', String(n === d.fx)); b.classList.remove('autofx'); });
+      d.fxAmtCtl.set(d.fxAmt * 10, false); d.fxRateCtl.set(d.fxRate * 100, false); d.fxFbCtl.set(d.fxFb * 100, false); return; }
+    FX.forEach(n => { const b = el(`fx-${n}`); b.setAttribute('aria-pressed', String(n === nm)); b.classList.toggle('autofx', n === nm); });
+    const target = Math.round(Math.min(1, v.amt) * 10), r0 = v.rate != null ? clamp(v.rate * (nm === 'echo' ? 100 : 40), 5, 95) : 55, f0 = v.fb != null ? v.fb * 100 : 60, t0 = performance.now();
+    d._fxAnim = setInterval(() => { const k = (performance.now() - t0) / 1000;
+      d.fxAmtCtl.set(Math.min(target, Math.round(target * Math.min(1, k * 4) * 10) / 10), false);
+      d.fxRateCtl.set(clamp(r0 + 18 * Math.sin(k * 5), 0, 100), false); d.fxFbCtl.set(clamp(f0 + 12 * Math.sin(k * 3.3 + 1), 0, 100), false); }, 60);
+  };
   // Vue d'ensemble : toucher pour se déplacer
   const over = d.ui.over; let overDown = false;
   const seekFrom = e => { if (!d.buffer) return; const r = over.getBoundingClientRect(); d.seek(clamp((e.clientX - r.left) / r.width, 0, 1) * d.duration); };
@@ -2185,6 +2200,7 @@ let auto = false, plan = null, transBeats = 32, waitFree = null, endOfList = fal
 const STYLES = [['clean', 'CFX']];
 let mixCount = Math.floor(Math.random() * STYLES.length);
 function fxAt(d, v, t, tc = 0.05){
+  try { if (d.fxShow){ const ms = Math.max(0, (t - ctx.currentTime) * 1000); setTimeout(() => d.fxShow(v), ms); } } catch(e){}
   const a = v.amt || 0, nm = v.name, set = (g, x) => g.gain.setTargetAtTime(x, t, tc);
   if (d.fxIn && nm && d.fxIn[nm]){ d.fxHold = d.fxHold || {}; if (a > 0){ d.fxHold[nm] = true; d.fxGate(nm, true); } else { d.fxHold[nm] = false; d.fxGate(nm, false); } }
   set(d.flWet, nm === 'flanger' ? a * 0.85 : 0); set(d.chWet, 0); set(d.rvWet, 0);
@@ -3257,7 +3273,8 @@ function soloFx(){
   else if (fx === 'flanger') fxAt(d, {name: 'flanger', amt: 0.55}, at(E - 4 * T), 0.3);
   else if (fx === 'filter') fxAt(d, {name: 'filter', amt: 0.7, rate: 2 * d.bpm * d.rate / 60 / 4}, at(E - 4 * T), 0.2);
   else if (fx === 'echo') fxAt(d, {name: 'echo', amt: 0.6, rate: 0.75, fb: 0.5}, at(E - 1 * T), 0.02);
-  else { for (let i = 0; i < 4; i++) paramAt(d, 'filt', Math.round(10 + 9 * i), at(E - (4 - i) * T), 0.2); paramAt(d, 'filt', 0, tE, 0.01); setTimeout(() => d.ctl.filt.set(0, false), (tE - ctx.currentTime) * 1000 + 50); }
+  else { for (let i = 0; i < 4; i++){ const v = Math.round(10 + 9 * i), tt = at(E - (4 - i) * T); paramAt(d, 'filt', v, tt, 0.2); setTimeout(() => d.ctl.filt.set(v, false), (tt - ctx.currentTime) * 1000); }
+    paramAt(d, 'filt', 0, tE, 0.01); setTimeout(() => d.ctl.filt.set(0, false), (tE - ctx.currentTime) * 1000 + 50); }
   if (fx !== 'sweep'){ fxAt(d, {name: 'none'}, fx === 'echo' ? tE + bt : tE, 0.02);
     setTimeout(() => { if (!(plan && plan.scheduled)) d.applyFx(); }, ((fx === 'echo' ? tE + bt : tE) - ctx.currentTime) * 1000 + 80); }
   lockInfo = {t: tE - 4 * bt, txt: `FX ${fx.toUpperCase()} · fin du bloc`};

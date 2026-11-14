@@ -990,7 +990,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 114</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 115</p>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1002,7 +1002,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
           <p class="snote">« Recalculer » efface tous les réglages gardés (BPM, grille, K, B1, B2, C, F) : chaque son est réanalysé à zéro, les sons restent. « Vider » retire tous les sons gardés dans l'appli (tes fichiers sur le téléphone ne sont pas touchés), tu pourras les remettre. Appuie deux fois pour confirmer.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="dbtn" id="lib-recalc">Recalculer tous les sons</button><button class="dbtn" id="lib-wipe">Vider la bibliothèque</button></div>
         </div>
-        <div class="sgroup">
+        <div class="sgroup" id="diag-sec" hidden>
           <h3>Rapport de mix</h3>
           <p class="snote">Si un mix part décalé : copie ce rapport juste après et colle-le dans la conversation avec Claude. Il contient les mesures de l'analyse et du lancement (aucun son, aucun fichier).</p>
           <button class="dbtn" id="diag-copy">Copier le rapport</button>
@@ -4225,6 +4225,12 @@ function setLite(on){
 }
 $('lite').addEventListener('click', () => setLite(!LITE));
 if ($('appver').textContent.includes('__' + 'VER__')) $('appver').textContent = 'WARTEK MACHINE · aperçu';
+// Réglages avancés cachés : 5 taps rapides sur la ligne de version font apparaître le rapport de mix (mémorisé sur ce téléphone)
+{ const sec = $('diag-sec'), KEY = 'wm-adv'; let n = 0, tm = 0;
+  try { if (localStorage.getItem(KEY) === '1') sec.hidden = false; } catch(e){}
+  $('appver').addEventListener('click', () => { clearTimeout(tm); tm = setTimeout(() => n = 0, 1500);
+    if (++n >= 5){ n = 0; sec.hidden = !sec.hidden; try { localStorage.setItem(KEY, sec.hidden ? '0' : '1'); } catch(e){}
+      toast(sec.hidden ? 'Réglages avancés cachés.' : 'Réglages avancés : rapport de mix visible.', 2500); } }); }
 try { setLite(localStorage.getItem('wartek-lite') === '1'); } catch(e){ setLite(false); }
 // on prépare l'oreille du mix (AudioWorklet) dès le démarrage, pour qu'elle soit prête au premier mix
 try { earLoad(); } catch(e){}

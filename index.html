@@ -282,6 +282,7 @@ button{cursor:pointer}
 .dhead{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #2e3034}
 .dhead h2{margin:0;font-size:24px;letter-spacing:.06em;text-transform:uppercase;flex:1}
 .dbtn{height:40px;padding:0 16px;border-radius:6px;border:1px solid #0a0b0d;background:linear-gradient(#3a3c41,#26282c);font-size:16px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;display:grid;place-items:center;cursor:pointer;touch-action:manipulation}
+.dpanel:has(> .sbar){grid-template-rows:auto auto minmax(0,1fr)}
 .sbar{flex:0 0 auto;display:flex;gap:8px;overflow-x:auto;padding:4px 18px 12px;scrollbar-width:none;flex-wrap:nowrap;touch-action:pan-x}.sbar::-webkit-scrollbar{display:none}
 .chip{flex:0 0 auto;padding:8px 14px;border-radius:999px;border:1px solid var(--sc,#888);color:#dfe;background:transparent;font:600 14px var(--font-ui,sans-serif);white-space:nowrap;touch-action:manipulation}
 .chip[aria-pressed="true"]{background:var(--sc,#888);color:#000}.chip.zero{opacity:.4}.chip b{font-weight:400;opacity:.75;margin-left:6px}
@@ -1021,7 +1022,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 122</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 123</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>

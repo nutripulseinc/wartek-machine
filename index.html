@@ -1024,7 +1024,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 124</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 125</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -1195,7 +1195,7 @@ function idb(store, mode, fn){
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
 let storeWarned = false;
 async function saveTrack(t){
-  try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file, markers: t.markers || null, style: t.style || null, genreTried: !!t.genreTried})); }
+  try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file, markers: t.markers || null, style: t.style || null, genreTried: !!t.genreTried, ana: t.ana || null})); }
   catch(e){ if (!storeWarned){ storeWarned = true; toast('Plus de place pour garder tes morceaux : ceux-là seront à réimporter la prochaine fois.'); } }
 }
 // Marqueurs posés à la main, à l'endroit où joue la platine (calés sur le temps ou la mesure)
@@ -3048,6 +3048,10 @@ const edCurSnap = x => $('ed-free').getAttribute('aria-pressed') === 'true' ? x 
 const edSnapBar = x => ED.fb + Math.round((x - ED.fb) / (4 * edT())) * 4 * edT();
 const edBarNo = x => x == null ? '—' : Math.round((x - ED.fb) / (4 * edT())) + 1;
 function edFit(cv){ const r = cv.getBoundingClientRect(), w = Math.max(10, Math.round(cv.clientWidth * 1.5)), h = Math.max(10, Math.round(cv.clientHeight * 1.5)); if (cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; } return cv.getContext('2d'); }
+// Les calculs lourds de l'éditeur (validation, glissement, coupures) se font juste après l'affichage, un par un :
+// l'éditeur s'ouvre tout de suite et reste fluide, le texte se complète une fraction de seconde après
+function edLater(fn){ (edLater.q = edLater.q || []).push(fn); if (edLater.on) return; edLater.on = true;
+  const step = () => { const f = edLater.q.shift(); if (!f){ edLater.on = false; if (ED.t) edDraw(); return; } try { f(); } catch(e){} setTimeout(step, 0); }; setTimeout(step, 30); }
 function edDraw(){
   const t = ED.t; if (!t || $('editor').hidden) return;
   const dur = t.buffer.duration, T = edT();
@@ -3062,7 +3066,7 @@ function edDraw(){
     if (cAuto != null){ const x = cAuto / dur * W; g.globalAlpha = 0.6; g.fillStyle = ED_COL.cut; for (let y = 0; y < H; y += 10) g.fillRect(x - 1.5, y, 3, 6); g.font = 'bold 22px monospace'; g.fillText('C auto', x + 4, 22); g.globalAlpha = 1; }
     // Courbe « kicks / grille » : un point par kick = de combien il tombe avant (haut) ou après (bas) la grille.
     // Ligne plate au milieu = BPM juste. Pente = BPM un peu faux. Marches = coupures de montage dans le son.
-    { const key = ED.bpm + '|' + ED.fb; if (ED.curveFor !== key){ ED.curveFor = key; try { ED.curve = localPhases(ED.t, ED.bpm, ED.fb, 4); } catch(e){ ED.curve = []; } }
+    { const key = ED.bpm + '|' + ED.fb; if (ED.curveFor !== key){ ED.curveFor = key; ED.curve = []; const t0 = ED.t; edLater(() => { if (ED.t !== t0 || ED.curveFor !== key) return; try { ED.curve = localPhases(ED.t, ED.bpm, ED.fb, 4); } catch(e){ ED.curve = []; } }); }
       const lim = 0.06; if (ED.curve && ED.curve.length){ g.globalAlpha = 0.5; g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(0, H * 0.62, W, H * 0.38); g.globalAlpha = 1;
         g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(0, H * 0.81, W, 1);
         for (const q of ED.curve){ const r = q.off, y = H * 0.81 + clamp(r / lim, -1, 1) * H * 0.18;
@@ -3094,13 +3098,13 @@ function edDraw(){
     if (ED.src){ const p = edPosNow(); g.fillStyle = '#ffb13d'; g.fillRect((p - v0) / px - 1, 0, 2, H); } }
   $('ed-bpm').textContent = ED.bpm.toFixed(2);
   const auto = t.autoBpm ? ` · analyse auto : ${t.autoBpm.toFixed(2)} BPM` : '';
-  if (ED.t && ED.driftFor !== ED.bpm + '|' + ED.fb){ ED.driftFor = ED.bpm + '|' + ED.fb; try { const L = gridLock(ED.t, ED.bpm, ED.fb); ED.driftTxt = L ? ` · Kicks / grille : ${L.driftBefore.map(v => v == null ? '–' : (v > 0 ? '+' : '') + v).join(' / ')} ms (début → fin)${Math.max(...L.driftBefore.filter(v => v != null).map(Math.abs)) > 12 ? ' ⚠ décalée : touche 🔒' : ' ✓'}` : ''; } catch(e){ ED.driftTxt = ''; } }
-  if (ED.t && ED.spFor !== ED.bpm + '|' + ED.fb){ ED.spFor = ED.bpm + '|' + ED.fb; try { const sp = spliceScan(ED.t, ED.bpm, ED.fb); ED.spTxt = sp.length ? ` · ⚠ ${sp.length} coupure(s) de montage (kicks qui sautent de ${sp.map(q => (q.ms > 0 ? '+' : '') + q.ms).join(', ')} ms à ${sp.map(q => edBarNo(q.t)).join(', ')}) : la grille ne peut pas coller partout, cale-la sur la zone de tes repères` : ''; } catch(e){ ED.spTxt = ''; } }
+  if (ED.t && ED.driftFor !== ED.bpm + '|' + ED.fb){ ED.driftFor = ED.bpm + '|' + ED.fb; edLater(() => { try { const L = gridLock(ED.t, ED.bpm, ED.fb); ED.driftTxt = L ? ` · Kicks / grille : ${L.driftBefore.map(v => v == null ? '–' : (v > 0 ? '+' : '') + v).join(' / ')} ms (début → fin)${Math.max(...L.driftBefore.filter(v => v != null).map(Math.abs)) > 12 ? ' ⚠ décalée : touche 🔒' : ' ✓'}` : ''; } catch(e){ ED.driftTxt = ''; } }); }
+  if (ED.t && ED.spFor !== ED.bpm + '|' + ED.fb){ ED.spFor = ED.bpm + '|' + ED.fb; edLater(() => { try { const sp = spliceScan(ED.t, ED.bpm, ED.fb); ED.spTxt = sp.length ? ` · ⚠ ${sp.length} coupure(s) de montage (kicks qui sautent de ${sp.map(q => (q.ms > 0 ? '+' : '') + q.ms).join(', ')} ms à ${sp.map(q => edBarNo(q.t)).join(', ')}) : la grille ne peut pas coller partout, cale-la sur la zone de tes repères` : ''; } catch(e){ ED.spTxt = ''; } }); }
   { const key = ED.bpm + '|' + (ED.m.bass ?? '') + '|' + (ED.m.bass2 ?? '');
-    if (ED.t && ED.valFor !== key){ ED.valFor = key; try { const v = bpmCheck(ED.t, ED.bpm, ED.m.bass, ED.m.bass2), ms = d => d == null ? '?' : (d >= 0 ? '+' : '') + Math.round(d * 1000);
+    if (ED.t && ED.valFor !== key){ ED.valFor = key; ED.valTxt = ED.valTxt || ' · VALIDATION : calcul…'; edLater(() => { try { const v = bpmCheck(ED.t, ED.bpm, ED.m.bass, ED.m.bass2), ms = d => d == null ? '?' : (d >= 0 ? '+' : '') + Math.round(d * 1000);
       ED.valTxt = ` · VALIDATION : peigne ${v.comb != null ? v.comb.toFixed(3) : '?'} ${v.okC ? '✓' : '✗ (BPM réglé ' + ED.bpm.toFixed(3) + ')'}`
         + (v.beats != null ? ` · B1 → B2 = ${v.beats} temps ${v.ok12 ? '✓' : `✗ (${v.resid > 0 ? '+' : ''}${v.resid} ms en trop : BPM d'après tes basses ${v.bpm12.toFixed(3)})`} · kick réel : B1 ${ms(v.d1)} ms, B2 ${ms(v.d2)} ms de tes marqueurs (le mix cale sur le kick réel)` : '')
-        + (v.ok ? ' → ✅ BPM SÛR' : ' → ⚠ à vérifier'); } catch(e){ ED.valTxt = ''; } } }
+        + (v.ok ? ' → ✅ BPM SÛR' : ' → ⚠ à vérifier'); } catch(e){ ED.valTxt = ''; } }); } }
   $('ed-info').textContent = `Curseur ${ED.cur.toFixed(3)} s (mesure ${edBarNo(ED.cur)}) · K ${ED.m.kick.toFixed(3)} s · B1 mesure ${edBarNo(ED.m.bass)} · B2 mesure ${edBarNo(ED.m.bass2)} · F mesure ${edBarNo(ED.m.out)} · C ${ED.m.cut == null ? (cAuto != null ? 'auto mesure ' + edBarNo(cAuto) + ' (64 temps après B2, 32 si trop près de la fin)' : 'auto') : 'mesure ' + edBarNo(ED.m.cut) + ' (' + ED.m.cut.toFixed(2) + ' s)'}${auto}${ED.valTxt || ''}${ED.driftTxt || ''}${ED.spTxt || ''}. Courbe en bas de la vue d'ensemble : points verts au milieu = clic pile sur les kicks. K2 se calcule seul au mix : B2 moins l'intro (K → B1) du son qui entre.`;
 }
 // Vérifier un son AVANT de le mixer : il est analysé (sans platine) puis ouvert dans l'éditeur
@@ -3851,10 +3855,16 @@ function levelTrim(buf){
   const trim = Math.min(1.6, 0.25 / Math.max(loud, 1e-4), 0.7 / Math.max(peak, 1e-4));
   return {trim, peakDb: 20 * Math.log10(peak + 1e-9), loudDb: 20 * Math.log10(loud + 1e-9)};
 }
+const ANAVER = 1, ANA_KEYS = ['gainTrim', 'lvlInfo', 'bpm', 'firstBeat', 'start', 'env', 'envRate', 'peaks', 'tempoFixed', 'kickFix', 'fitInfo', 'combConf', 'combInfo', 'dbInfo', 'autoStart', 'autoBpm', 'autoFb'];
 async function prepItem(t){
     if (!t.buffer) t.buffer = await decode(await t.file.arrayBuffer());
     if (t.gainTrim == null){ const lv = levelTrim(t.buffer); t.gainTrim = lv.trim; t.lvlInfo = lv; }
-    if (!t.bpm){ const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
+    if (!t.bpm){
+      // Analyse gardée en mémoire avec le son : à la réouverture de l'appli, plus besoin de tout recalculer (seulement décoder le son)
+      const okCache = t.ana && t.ana.v === ANAVER && Math.abs((t.ana.dur || 0) - t.buffer.duration) < 0.05;
+      if (okCache){ ANA_KEYS.forEach(k => { if (t.ana[k] !== undefined) t[k] = t.ana[k]; }); if (t.ana.ctc) t._ctc = t.ana.ctc; }
+      else {
+      const r = await analyzeBpm(t.buffer); t.bpm = r.bpm; t.firstBeat = r.firstBeat; t.start = r.start; t.env = r.env; t.envRate = r.envRate;
       if (!t.peaks) t.peaks = computePeaks(t.buffer);
       { const tf = tempoFix(t); if (tf){ t.bpm = tf.bpm; t.firstBeat = t.start = tf.fb; t.tempoFixed = `${tf.from.toFixed(2)} → ${tf.bpm.toFixed(2)}`; } }
       const kf = kickFit(t.buffer, t.firstBeat, 60 / t.bpm); if (kf){ t.kickFix = kf.fb - t.firstBeat; t.bpm = kf.bpm; t.firstBeat = t.start = kf.fb; t.fitInfo = kf; }
@@ -3870,6 +3880,8 @@ async function prepItem(t){
         if (db.t0 != null && db.t0 < t.firstBeat + 0.6 * 60 / t.bpm) t.start = Math.max(0, db.t0);
         t.autoStart = t.start; }
       t.autoBpm = t.bpm; t.autoFb = t.firstBeat;
+      t.ana = {v: ANAVER, dur: t.buffer.duration, ctc: t._ctc || {}}; if (t._comb) t.ana.comb = combPack(t._comb); ANA_KEYS.forEach(k => { if (t[k] !== undefined) t.ana[k] = t[k]; }); if (t.id) saveTrack(t);
+      }
       // Garde-fou : une grille / un K gardés en mémoire (anciennes versions) doivent tomber au DÉBUT du son.
       // Si le K mémorisé est après le début de la wave (ou avant 0), on l'ignore : K et grille repris de l'analyse.
       if (t.markers && !t.markers.ok && (t.markers.bpm || t.markers.kick != null)){   // (réglages vérifiés dans l'éditeur : respectés tels quels)
@@ -4118,8 +4130,13 @@ function kickOnsets(buf){
 // Pour chaque BPM candidat, on pose une grille (toutes les positions de départ, au ms) et on additionne les attaques
 // qui tombent dessus sur TOUT le morceau. Le vrai BPM est celui où ça « résonne » le plus. Un BPM faux de 0,05 seulement
 // fait glisser la grille de plusieurs dizaines de ms sur le morceau : le peigne le voit tout de suite.
+// L'analyse gardée (BPM, enveloppe des attaques…) est réenregistrée peu après un ajout, sans bloquer
+function anaSaveSoon(t){ if (t.id && !t._anaSave) t._anaSave = setTimeout(() => { t._anaSave = 0; saveTrack(t); }, 4000); }
+function combPack(C){ const q = new Uint16Array(C.n); for (let k = 0; k < C.n; k++) q[k] = Math.round(C.e[k] * 20000); return {q, rate: C.rate, n: C.n}; }
+function combUnpack(P){ const e = new Float32Array(P.n); for (let k = 0; k < P.n; k++) e[k] = P.q[k] / 20000; return {e, rate: P.rate, n: P.n}; }
 function combEnv(t){
   if (t._comb) return t._comb;
+  if (t.ana && t.ana.comb && t.ana.comb.q) return (t._comb = combUnpack(t.ana.comb));
   const buf = t.buffer, sr = buf.sampleRate, L = buf.getChannelData(0), Rr = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L, hop = Math.round(sr / 1000), n = Math.floor(L.length / hop), rate = sr / hop;
   const bq = (type, f) => { const w = 2 * Math.PI * f / sr, al = Math.sin(w) / Math.SQRT2, c = Math.cos(w), a0 = 1 + al;
     return type === 'lp' ? [(1 - c) / 2 / a0, (1 - c) / a0, (1 - c) / 2 / a0, -2 * c / a0, (1 - al) / a0] : [(1 + c) / 2 / a0, -(1 + c) / a0, (1 + c) / 2 / a0, -2 * c / a0, (1 - al) / a0]; };
@@ -4132,7 +4149,8 @@ function combEnv(t){
     const s = Array.from(o.filter((v, i) => i % 7 === 0)).sort((a, b) => a - b), q = s[Math.floor(s.length * 0.99)] || 1; for (let k = 0; k < n; k++) o[k] = Math.min(1.5, o[k] / q);
     return o; };
   const lo = band(bq('lp', 150)), hi = band(bq('hp', 3000)), e = new Float32Array(n); for (let k = 0; k < n; k++) e[k] = lo[k] + hi[k];
-  return (t._comb = {e, rate, n});
+  t._comb = {e, rate, n}; if (t.ana && !t.ana.comb){ t.ana.comb = combPack(t._comb); anaSaveSoon(t); }
+  return t._comb;
 }
 function combScore(C, bpm, step = 1){
   const T = 60 / bpm * C.rate, a = Math.floor(C.n * 0.04), b = Math.floor(C.n * 0.96), e = C.e; let best = 0, bd = 0;
@@ -4140,6 +4158,13 @@ function combScore(C, bpm, step = 1){
   return {s: best, phase: (a + bd) / C.rate};
 }
 function combTempo(t, b0){
+  const key = b0.toFixed(4); t._ctc = t._ctc || {}; if (t._ctc[key]) return t._ctc[key];   // déjà calculé pour ce son et ce BPM
+  const res = combTempo0(t, b0); t._ctc[key] = res;
+  // gardé avec l'analyse du son : la vérification de l'éditeur est instantanée les fois suivantes
+  if (t.ana){ t.ana.ctc = t._ctc; anaSaveSoon(t); }
+  return res;
+}
+function combTempo0(t, b0){
   const C = combEnv(t); let best = {bpm: b0, ...combScore(C, b0)}; const cur = best.s;
   for (let b = b0 * 0.985; b <= b0 * 1.015; b += 0.05){ const r = combScore(C, b, 3); if (r.s > best.s) best = {bpm: b, ...r}; }
   const c0 = best.bpm; best = {bpm: c0, ...combScore(C, c0)}; for (let b = c0 - 0.06; b <= c0 + 0.06; b += 0.004){ const r = combScore(C, b, 2); if (r.s > best.s) best = {bpm: b, ...r}; }
@@ -4508,7 +4533,7 @@ function twoTap(btn, label, run){
 }
 twoTap($('lib-recalc'), 'Recalculer tous les sons', async () => {
   const recs = await idb('tracks', 'readonly', st => st.getAll()) || [];
-  for (const r of recs){ r.markers = null; await idb('tracks', 'readwrite', st => st.put(r)); }
+  for (const r of recs){ r.markers = null; r.ana = null; await idb('tracks', 'readwrite', st => st.put(r)); }
 });
 twoTap($('lib-wipe'), 'Vider la bibliothèque', async () => {
   await idb('tracks', 'readwrite', st => st.clear());
@@ -4574,7 +4599,7 @@ applySkin(savedSkin);
     }
     for (const a in alias){ let b = alias[a]; while (alias[b]) b = alias[b]; alias[a] = b; }
     const kept = new Set([...keep.values()].map(r => r.id));
-    saved = recs.filter(r => kept.has(r.id)).map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null, style: r.style || null, genreTried: !!r.genreTried}));
+    saved = recs.filter(r => kept.has(r.id)).map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null, style: r.style || null, genreTried: !!r.genreTried, ana: r.ana || null}));
     saved.alias = alias;
   } catch(e){}
   const specs = [

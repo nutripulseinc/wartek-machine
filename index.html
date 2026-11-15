@@ -282,8 +282,15 @@ button{cursor:pointer}
 .dhead{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #2e3034}
 .dhead h2{margin:0;font-size:24px;letter-spacing:.06em;text-transform:uppercase;flex:1}
 .dbtn{height:40px;padding:0 16px;border-radius:6px;border:1px solid #0a0b0d;background:linear-gradient(#3a3c41,#26282c);font-size:16px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;display:grid;place-items:center;cursor:pointer;touch-action:manipulation}
+.sbar{display:flex;gap:8px;overflow-x:auto;padding:4px 18px 12px;scrollbar-width:none;flex-wrap:nowrap;touch-action:pan-x}.sbar::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;padding:8px 14px;border-radius:999px;border:1px solid var(--sc,#888);color:#dfe;background:transparent;font:600 14px var(--font-ui,sans-serif);white-space:nowrap;touch-action:manipulation}
+.chip[aria-pressed="true"]{background:var(--sc,#888);color:#000}.chip.zero{opacity:.4}.chip b{font-weight:400;opacity:.75;margin-left:6px}
+.sty{justify-self:start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 9px;border-radius:999px;border:1px solid var(--sc,#666);background:color-mix(in srgb,var(--sc,#666) 22%,transparent);color:#eef;font:600 12px var(--font-ui,sans-serif)}
+.sty.guess{border-style:dashed;opacity:.65}.sty.none{opacity:.45}
+.dlist li.sel{background:rgba(32,230,232,.12)}.dlist li .ck2{font-size:18px;color:var(--a)}
+.sdot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--sc);margin-right:6px;vertical-align:middle;box-shadow:0 0 6px var(--sc)}
 .dlist{list-style:none;margin:0;padding:0 18px;overflow-y:auto;touch-action:pan-y}
-.dlist li{display:grid;grid-template-columns:28px 1fr 100px 96px 46px 46px 52px 52px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #222428;min-width:0}
+.dlist li{display:grid;grid-template-columns:28px 1fr 120px 100px 96px 46px 46px 52px 52px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #222428;min-width:0}
 .dlist .i{font-family:var(--font-lcd);color:var(--mute);font-size:15px}
 .dlist .n{font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dlist .m{font-family:var(--font-lcd);font-size:14px;color:var(--mute)}
@@ -917,14 +924,22 @@ body[data-skin="psy"] .bline{visibility:hidden}
     <div class="dpanel" role="dialog" aria-label="Playlist">
       <div class="dhead">
         <h2>Playlist</h2>
+        <button class="dbtn" id="dl-classer" aria-pressed="false" title="Coche des sons puis touche un bac pour les y ranger">Classer</button>
         <label class="dbtn" for="lib-file">Importer du téléphone</label>
         <input type="file" id="lib-file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden>
         <button class="dbtn" data-close>Fermer</button>
       </div>
+      <div class="sbar" id="dl-sbar"></div>
       <ul class="dlist" id="dlist"></ul>
     </div>
   </div>
 
+  <div class="drawer" id="stypick" hidden>
+    <div class="dpanel" role="dialog" aria-label="Choisir le style" style="max-width:640px;height:auto">
+      <div class="dhead"><h2 id="sp-title">Style</h2><button class="dbtn" data-close>Fermer</button></div>
+      <div class="sbar" id="sp-bar" style="padding-bottom:18px"></div>
+    </div>
+  </div>
   <div class="drawer" id="qpick" hidden>
     <div class="dpanel" role="dialog" aria-label="Ajouter à la file">
       <div class="dhead">
@@ -935,6 +950,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         <button class="dbtn qp-ok" id="qp-ok" disabled>Ajouter</button>
         <button class="dbtn" data-close>Fermer</button>
       </div>
+      <div class="sbar" id="qp-sbar"></div>
       <ul class="dlist qplist" id="qp-list"></ul>
     </div>
   </div>
@@ -1005,7 +1021,12 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 120</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 121</p>
+        </div>
+        <div class="sgroup">
+          <h3>Smart Mix et styles</h3>
+          <p class="snote">Quand la file « À suivre » est vide, le Smart Mix prend le prochain son de la playlist. Avec cette option, il prend le prochain du <b>même bac</b> (même style).</p>
+          <button class="dbtn" id="keepstyle" aria-pressed="false">Rester dans le style : non</button>
         </div>
         <div class="sgroup">
           <h3>Sons de départ</h3>
@@ -1171,7 +1192,7 @@ function idb(store, mode, fn){
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
 let storeWarned = false;
 async function saveTrack(t){
-  try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file, markers: t.markers || null})); }
+  try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file, markers: t.markers || null, style: t.style || null, genreTried: !!t.genreTried})); }
   catch(e){ if (!storeWarned){ storeWarned = true; toast('Plus de place pour garder tes morceaux : ceux-là seront à réimporter la prochaine fois.'); } }
 }
 // Marqueurs posés à la main, à l'endroit où joue la platine (calés sur le temps ou la mesure)
@@ -3515,7 +3536,12 @@ function autoTick(){
   if (now >= plan.tEnd || !n.playing || (!o.playing && now > plan.T0 && now < plan.tDrop)) finishTransition();
 }
 
-function nextIndexAfter(item){ const i = lib.indexOf(item); return i >= 0 && i + 1 < lib.length ? i + 1 : -1; }
+function nextIndexAfter(item){ const i = lib.indexOf(item);
+  // « Rester dans le style » : le prochain son de la playlist du même bac (sinon le suivant tout court)
+  let keep = false; try { keep = localStorage.getItem('wm-keepstyle') === '1'; } catch(e){}
+  const st = keep && item && styleOf(item);
+  if (st){ for (let k = 1; k < lib.length; k++){ const j = (i + k) % lib.length; const s2 = styleOf(lib[j]); if (j !== i && s2 && s2.n === st.n && !(Object.values(decks).some(d => d.item === lib[j]))) return j; } }
+  return i >= 0 && i + 1 < lib.length ? i + 1 : -1; }
 // Prochain son : d'abord la file « À suivre » de la platine libre, puis celle de l'autre, puis l'ordre de la playlist
 function peekNext(cur){
   const free = other(cur);
@@ -3547,7 +3573,7 @@ function onTrackEnd(d){
 function renderQueue(d){
   const ul = $(`${d.id}-qlist`); if (!ul) return;
   d.queue = d.queue.filter(t => lib.includes(t));
-  ul.innerHTML = d.queue.length ? d.queue.map((t, i) => `<li><span class="qn">${i + 1}</span><span class="qt" data-qd="${d.id}" data-qi="${i}" title="Charger maintenant">${esc(t.name)}${isChecked(t) ? '<span class="qok">✓</span>' : ''}${doubtTxt(t)}</span><button data-qx="${d.id}" data-qi="${i}" aria-label="Retirer de la file">×</button></li>`).join('')
+  ul.innerHTML = d.queue.length ? d.queue.map((t, i) => `<li><span class="qn">${i + 1}</span><span class="qt" data-qd="${d.id}" data-qi="${i}" title="Charger maintenant">${styDot(t)}${esc(t.name)}${isChecked(t) ? '<span class="qok">✓</span>' : ''}${doubtTxt(t)}</span><button data-qx="${d.id}" data-qi="${i}" aria-label="Retirer de la file">×</button></li>`).join('')
     : `<li class="qempty">Ajoute les prochains sons : ils se chargeront ici, dans l'ordre.</li>`;
 }
 function saveQueues(){ idb('samples', 'readwrite', st => st.put({A: decks.A.queue.map(t => t.id).filter(Boolean), B: decks.B.queue.map(t => t.id).filter(Boolean)}, '__queues')).catch(() => {}); }
@@ -3604,11 +3630,73 @@ function addFiles(files, after){
   if (auto && endOfList){ const cur = Object.values(decks).find(d => d.playing); if (cur) queueNext(cur, other(cur)); }
   return lib.indexOf(out[0]);
 }
+// ===== Bacs par style : chaque son a un style (lu dans le fichier, ou proposé d'après son BPM, ou choisi à la main) =====
+const STYLE_DEF = [['Speedcore', '#ff2a2a'], ['Hardcore', '#ff7a1a'], ['Uptempo', '#ffb547'], ['Hardstyle', '#20e6e8'], ['Rawstyle', '#2e8cff'], ['Tribe', '#39ff14'],
+  ['Électro', '#b14dff'], ['House', '#ff4fd8'], ['Dubstep', '#00ffa3'], ['Drum & Bass', '#ffe14d'], ['Rap', '#c8c8c8'], ['Autre', '#7a8a90']];
+const STY = {filter: null, classer: false, sel: []};
+let BACS = STYLE_DEF.map(([n, c]) => ({n, c}));
+try { const x = JSON.parse(localStorage.getItem('wm-styles') || 'null'); if (Array.isArray(x) && x.length) BACS = x; } catch(e){}
+const saveStyles = () => { try { localStorage.setItem('wm-styles', JSON.stringify(BACS)); } catch(e){} };
+const styCol = n => (BACS.find(x => x.n === n) || {c: '#7a8a90'}).c;
+function guessStyle(t){ const b = t.bpm; if (!b) return null;
+  return b >= 215 ? 'Speedcore' : b >= 186 ? 'Uptempo' : b >= 166 ? 'Hardcore' : b >= 145 && b <= 165 ? 'Hardstyle' : b >= 118 && b <= 132 ? 'House' : b >= 70 && b <= 105 ? 'Rap' : null; }
+function styleOf(t){ if (t.style) return {n: t.style, sure: true}; const g = guessStyle(t); return g ? {n: g, sure: false} : null; }
+const inFilter = t => { if (!STY.filter) return true; const s = styleOf(t); return !!s && s.n === STY.filter; };
+const styDot = t => { const s = styleOf(t); return s && s.sure ? `<span class="sdot" style="--sc:${styCol(s.n)}" title="${esc(s.n)}"></span>` : ''; };
+const styBadge = (t, i) => { const s = styleOf(t);
+  return s ? `<button class="sty${s.sure ? '' : ' guess'}" data-sty="${i}" style="--sc:${styCol(s.n)}" title="${s.sure ? 'Changer de bac' : 'Proposé d\'après le BPM : touche pour confirmer ou changer'}">${esc(s.n)}${s.sure ? '' : ' ?'}</button>`
+    : `<button class="sty none" data-sty="${i}">Classer…</button>`; };
+function renderSbar(id){
+  const cnt = n => lib.filter(t => { const s = styleOf(t); return s && s.n === n; }).length;
+  $(id).innerHTML = `<button class="chip" data-chip="" style="--sc:#dfe" aria-pressed="${!STY.filter}">Tous<b>${lib.length}</b></button>`
+    + BACS.map(x => { const c = cnt(x.n); return `<button class="chip${c ? '' : ' zero'}" data-chip="${esc(x.n)}" style="--sc:${x.c}" aria-pressed="${STY.filter === x.n}">${esc(x.n)}<b>${c}</b></button>`; }).join('')
+    + (id === 'dl-sbar' ? `<button class="chip" data-chipadd="1" style="--sc:#888">＋ Bac</button>` : ''); }
+function setStyle(list, n){ list.forEach(t => { t.style = n || null; saveTrack(t); }); }
+// Style lu dans le fichier (tag « genre » des MP3 / M4A / FLAC), une seule fois par son
+const GENRE_MAP = [[/speedcore|extratone|splittercore/i, 'Speedcore'], [/uptempo/i, 'Uptempo'], [/hardcore|gabber|frenchcore|terror/i, 'Hardcore'], [/rawstyle|raw ?hard/i, 'Rawstyle'],
+  [/hardstyle|hard ?dance|euphoric/i, 'Hardstyle'], [/tribe|tekno|free ?party|hardtek/i, 'Tribe'], [/dubstep|riddim|bass music/i, 'Dubstep'], [/drum|dnb|jungle|neuro/i, 'Drum & Bass'],
+  [/house/i, 'House'], [/electro|techno|edm|trance|big ?room/i, 'Électro'], [/rap|hip.?hop|trap|drill/i, 'Rap']];
+async function readGenre(file){
+  try { const head = new Uint8Array(await file.slice(0, 600000).arrayBuffer()), tail = file.size > 600000 ? new Uint8Array(await file.slice(file.size - 400000).arrayBuffer()) : new Uint8Array(0);
+    const txt = buf => { let o = ''; for (let i = 0; i < buf.length; i++){ const c = buf[i]; o += c >= 32 && c < 127 ? String.fromCharCode(c) : c === 0 ? '\0' : ' '; } return o; };
+    for (const b of [head, tail]){ const s = txt(b);
+      let m = /TCON[\s\S]{6}[\0\x01\x03 ]*\s?\0?([A-Za-z0-9&'.\/ \-]{3,40})/.exec(s); if (m) return m[1];   // MP3 (ID3v2)
+      m = /\xa9gen[\s\S]{4}data[\s\S]{8}([A-Za-z0-9&'.\/ \-]{3,40})/.exec(s.replace(/©/g, '\xa9')); if (m) return m[1];
+      m = /gen[\s\S]{4}data[\s\S]{8}([A-Za-z0-9&'.\/ \-]{3,40})/.exec(s); if (m) return m[1];   // M4A
+      m = /GENRE=([A-Za-z0-9&'.\/ \-]{3,40})/i.exec(s); if (m) return m[1]; }   // FLAC / OGG
+  } catch(e){} return null; }
+async function genreScan(){
+  if (genreScan.busy) return; genreScan.busy = true; let changed = false;
+  for (const t of lib){ if (t.style || t.genreTried || !t.file || !t.id) continue; t.genreTried = true;
+    const g = await readGenre(t.file); const hit = g && GENRE_MAP.find(([re]) => re.test(g)); if (hit){ t.style = hit[1]; changed = true; } saveTrack(t); }
+  genreScan.busy = false; if (changed){ if (!$('drawer').hidden) renderLib(); if (!$('qpick').hidden) renderQPick(); }
+}
+document.addEventListener('click', e => {
+  const ch = e.target.closest('[data-chip]'), add = e.target.closest('[data-chipadd]');
+  if (add){ const inp = document.createElement('input'); inp.placeholder = 'Nom du bac'; inp.className = 'chip'; inp.style.cssText = 'min-width:140px;color:#fff;background:#111';
+    add.replaceWith(inp); inp.focus(); const done = () => { const v = inp.value.trim(); if (v && !BACS.some(x => x.n === v)){ BACS.push({n: v, c: `hsl(${Math.floor(Math.random() * 360)} 90% 60%)`}); saveStyles(); } renderLib(); };
+    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') inp.blur(); }); inp.addEventListener('blur', done); return; }
+  if (ch && ch.closest('#sp-bar')){ const n = ch.dataset.chip; setStyle(STY.pick || [], n); $('stypick').hidden = true; STY.pick = null; renderLib(); if (!$('qpick').hidden) renderQPick(); Object.values(decks).forEach(renderQueue); return; }
+  if (ch){ const n = ch.dataset.chip || null;
+    if (STY.classer && ch.closest('#dl-sbar') && n){ if (!STY.sel.length){ toast('Coche d\'abord des sons, puis touche le bac.'); return; }
+      setStyle(STY.sel, n); toast(`${STY.sel.length} son${STY.sel.length > 1 ? 's' : ''} rangé${STY.sel.length > 1 ? 's' : ''} dans « ${n} ».`, 2200); STY.sel = []; renderLib(); return; }
+    STY.filter = n; if (ch.closest('#qp-sbar')) renderQPick(); else renderLib(); return; }
+  const sb = e.target.closest('[data-sty]'); if (sb){ e.stopPropagation(); const t = lib[+sb.dataset.sty]; STY.pick = STY.classer && STY.sel.length ? STY.sel.slice() : [t];
+    $('sp-title').textContent = STY.pick.length > 1 ? `Ranger ${STY.pick.length} sons dans…` : `Style · ${t.name}`;
+    $('sp-bar').innerHTML = BACS.map(x => `<button class="chip" data-chip="${esc(x.n)}" style="--sc:${x.c}" aria-pressed="${(styleOf(t) || {}).n === x.n}">${esc(x.n)}</button>`).join('') + `<button class="chip" data-chip="" style="--sc:#888">Sans style</button>`;
+    $('sp-bar').style.flexWrap = 'wrap'; $('stypick').hidden = false; }
+});
+$('dl-classer').addEventListener('click', () => { STY.classer = !STY.classer; STY.sel = []; $('dl-classer').setAttribute('aria-pressed', String(STY.classer));
+  $('dl-classer').textContent = STY.classer ? 'Terminer' : 'Classer'; if (STY.classer) toast('Coche les sons, puis touche le bac où les ranger.', 2600); renderLib(); });
+$('dlist').addEventListener('click', e => { if (!STY.classer || e.target.closest('button')) return; const li = e.target.closest('li[data-li]'); if (!li) return;
+  const t = lib[+li.dataset.li], k = STY.sel.indexOf(t); if (k >= 0) STY.sel.splice(k, 1); else STY.sel.push(t); renderLib(); }, true);
 function renderLib(){
   const cur = Object.values(decks).find(d => d.playing);
-  $('dlist').innerHTML = lib.map((t, i) => `<li class="${cur && cur.item === t ? 'now' : ''}">
-    <span class="i">${i + 1}</span>
+  renderSbar('dl-sbar'); genreScan();
+  $('dlist').innerHTML = lib.map((t, i) => !inFilter(t) ? '' : `<li class="${cur && cur.item === t ? 'now' : ''}${STY.sel.includes(t) ? ' sel' : ''}" data-li="${i}">
+    <span class="i">${STY.classer ? `<span class="ck2">${STY.sel.includes(t) ? '☑' : '☐'}</span>` : i + 1}</span>
     <span class="n">${esc(t.name)}</span>
+    ${styBadge(t, i)}
     <span class="m">${t.bpm ? t.bpm.toFixed(1) + ' BPM' : '— BPM'}</span>
     <span class="m">${t.struct ? 'drop ' + fmt(t.struct.drop, 0) : 'à analyser'}</span>
     <button class="dbtn" data-up="${i}" aria-label="Monter dans la playlist" ${i === 0 ? 'disabled' : ''}>↑</button>
@@ -3678,13 +3766,15 @@ function openQPick(id){
   $('qp-imp').htmlFor = `${id}-qfile`;
   $('qpick').style.setProperty('--qc', id === 'A' ? 'var(--a)' : 'var(--b)');
   if (!lib.length){ $(`${id}-qfile`).click(); return; }
+  { const cur = Object.values(decks).find(x => x.playing) || qpDeck; const st = cur && cur.item && styleOf(cur.item); STY.filter = st && st.sure ? st.n : null; }
   renderQPick(); $('qpick').hidden = false;
 }
 function renderQPick(){
   const d = qpDeck;
-  $('qp-list').innerHTML = lib.map((t, i) => { const k = qpSel.indexOf(t);
+  renderSbar('qp-sbar');
+  $('qp-list').innerHTML = lib.map((t, i) => { const k = qpSel.indexOf(t); if (!inFilter(t)) return '';
     return `<li data-qp="${i}" role="checkbox" aria-checked="${k >= 0}" class="${d.queue.includes(t) || d.item === t ? 'inq' : ''}">
-      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${esc(t.name)}${isChecked(t) ? ' <span class="ok">✓</span>' : ''}${doubtTxt(t)}</span><span class="m">${t.bpm ? t.bpm.toFixed(1) + ' BPM' : '— BPM'}</span><button class="qe" data-qe="${i}" aria-label="Vérifier ce son dans l'éditeur">✎ Vérifier</button></li>`; }).join('')
+      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${styDot(t)}${esc(t.name)}${isChecked(t) ? ' <span class="ok">✓</span>' : ''}${doubtTxt(t)}</span><span class="m">${t.bpm ? t.bpm.toFixed(1) + ' BPM' : '— BPM'}</span><button class="qe" data-qe="${i}" aria-label="Vérifier ce son dans l'éditeur">✎ Vérifier</button></li>`; }).join('')
     + '<li class="dnote">Touche les sons dans l\'ordre où tu veux les jouer (le numéro = l\'ordre), puis « Ajouter ». « Du téléphone » importe de nouveaux fichiers : sur le téléphone, appuie longuement sur un fichier pour en cocher plusieurs.<br>✎ Vérifier : ouvre le son dans l\'éditeur pour contrôler K, B1, B2, C, F avant le mix. « Vérifier » en haut : passe un à un les sons cochés (ou, sans coche, ceux de la file pas encore vérifiés). ✓ = son vérifié.</li>';
   const n = qpSel.length, ok = $('qp-ok');
   ok.disabled = !n; ok.textContent = n ? `Ajouter (${n})` : 'Ajouter';
@@ -4422,6 +4512,9 @@ function setLite(on){
 }
 $('lite').addEventListener('click', () => setLite(!LITE));
 if ($('appver').textContent.includes('__' + 'VER__')) $('appver').textContent = 'WARTEK MACHINE · aperçu';
+{ const b = $('keepstyle'), get = () => { try { return localStorage.getItem('wm-keepstyle') === '1'; } catch(e){ return false; } };
+  const show = () => { const on = get(); b.setAttribute('aria-pressed', String(on)); b.textContent = `Rester dans le style : ${on ? 'oui' : 'non'}`; }; show();
+  b.addEventListener('click', () => { try { localStorage.setItem('wm-keepstyle', get() ? '0' : '1'); } catch(e){} show(); }); }
 // Sons de départ : les sons chargés sur A et B maintenant reviendront à chaque ouverture de l'appli
 { const note = () => { let st = null; try { st = JSON.parse(localStorage.getItem('wm-start') || 'null'); } catch(e){}
     const nm = id => (lib.find(t => t.id === id) || {}).name || '—';
@@ -4472,7 +4565,7 @@ applySkin(savedSkin);
     }
     for (const a in alias){ let b = alias[a]; while (alias[b]) b = alias[b]; alias[a] = b; }
     const kept = new Set([...keep.values()].map(r => r.id));
-    saved = recs.filter(r => kept.has(r.id)).map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null}));
+    saved = recs.filter(r => kept.has(r.id)).map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null, style: r.style || null, genreTried: !!r.genreTried}));
     saved.alias = alias;
   } catch(e){}
   const specs = [

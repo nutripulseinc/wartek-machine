@@ -1005,7 +1005,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 119</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 120</p>
         </div>
         <div class="sgroup">
           <h3>Sons de départ</h3>
@@ -2536,10 +2536,10 @@ function makePlan(o, n){
   // Coupure du son qui entre APRÈS sa basse de B1 (mesurée sur les vraies basses, mesure par mesure) : dès que B coupe ses basses
   // au moins 2 mesures d'affilée, A ne continue pas « dans l'ombre » — il part en écho et en fondu sur le début de la coupure.
   if (synced && I > 0){ const bd = bStart + I * nb, lim = Math.min(cutBars + tailBars, 64), lv = [];
-    for (let k = 0; k <= lim + 2; k++) lv.push(lowLevel(n.item, bd + k * 4 * nb, bd + (k + 1) * 4 * nb) || 0);
+    for (let k = 0; k <= lim + 3; k++) lv.push(lowLevel(n.item, bd + k * 4 * nb, bd + (k + 1) * 4 * nb) || 0);
     const ref = [...lv.slice(0, 8)].sort((a, b) => a - b)[4];
     if (ref > 0) for (let k = 4; k < lim; k++){
-      if (lv[k] < 0.3 * ref && lv[k + 1] < 0.3 * ref){ let kk = k; const b0 = Math.floor(k / 4) * 4; if (k % 4 && k - b0 <= 2 && lv[b0 + 1] < 0.6 * ref) kk = b0;
+      if ((lv[k] < 0.4 * ref && lv[k + 1] < 0.4 * ref) || (lv[k] < 0.15 * ref && lv[k + 1] < 0.65 * ref && lv[k + 2] < 0.65 * ref)){ let kk = k; const b0 = Math.floor(k / 4) * 4; if (k % 4 && k - b0 <= 2 && lv[b0 + 1] < 0.6 * ref) kk = b0;
         if (cutBar == null || kk < cutBar) cutBar = kk; break; } } }
   let stopBars = cutBar != null ? cutBar : cutBars + tailBars;
   // B1 du son qui entre nettement moins fort que la basse de A (B2) ? Alors A GARDE sa basse au drop (une des deux basses
@@ -2577,7 +2577,7 @@ function makePlan(o, n){
   // Volume adapté : le son qui entre est mis au MÊME niveau que celui qui sort (comparé sur B2 de A et B1 de B), ±3 dB au plus
   let match = 1, matchTxt = '';
   if (synced && I > 0 && !swapBeats){ const la = fullLevel(o.item, P, P + 16 * ob), lb = fullLevel(n.item, bDropT, bDropT + 16 * nb);
-    if (la && lb){ match = clamp(la / lb, 0.71, 1.41); const db = 20 * Math.log10(match); if (Math.abs(db) >= 0.8) matchTxt = `${n.id} ${db > 0 ? 'monté' : 'baissé'} de ${Math.abs(db).toFixed(1)} dB pour être au niveau de ${o.id}`; else match = 1; } }
+    if (la && lb){ match = clamp(la / lb, 0.6, 1.68); /* jusqu'à ±4,5 dB : un son masterisé plus fort / plus faible est remis au niveau */ const db = 20 * Math.log10(match); if (Math.abs(db) >= 0.8) matchTxt = `${n.id} ${db > 0 ? 'monté' : 'baissé'} de ${Math.abs(db).toFixed(1)} dB pour être au niveau de ${o.id}`; else match = 1; } }
   // Un peu de basse de A gardée au swap SEULEMENT si B tape ses basses sans coupure sur les 32 premiers temps :
   // si B coupe net ses basses (même 1 mesure), A est coupé net aussi (pas de basse de A qui traîne dans le trou)
   let keepLo = false;
@@ -2589,7 +2589,7 @@ function makePlan(o, n){
   let eq = null;
   if (synced && I > 0){ const A = bandLevels(o.item, P, P + 16 * ob), B = bandLevels(n.item, bDropT, bDropT + 16 * nb);
     if (A && B){ const rel = X => { const t = Math.max(X.lo, X.mid, X.hi); return {lo: X.lo - t, mid: X.mid - t, hi: X.hi - t}; }, ra = rel(A), rb = rel(B), r1 = v => Math.round(v);
-      eq = {bLo: r1(clamp((ra.lo - rb.lo) * 0.5, -3, 3)), bMid: r1(clamp((ra.mid - rb.mid) * 0.5, -3, 3)), bHi: r1(clamp((ra.hi - rb.hi) * 0.5, -3, 3)),
+      eq = {bLo: r1(clamp((ra.lo - rb.lo) * 0.7, -4, 4)), bMid: r1(clamp((ra.mid - rb.mid) * 0.7, -4, 4)), bHi: r1(clamp((ra.hi - rb.hi) * 0.7, -4, 4)),
             aMid: r1(clamp(-2 - (A.mid - B.mid) * 0.6, -8, 0)), aHi: r1(clamp(-2 - (A.hi - B.hi) * 0.6, -8, 0))};
       eq.txt = `${n.id} : graves ${eq.bLo >= 0 ? '+' : ''}${eq.bLo}, médiums ${eq.bMid >= 0 ? '+' : ''}${eq.bMid}, aigus ${eq.bHi >= 0 ? '+' : ''}${eq.bHi} dB · ${o.id} pendant B1/B2 : médiums ${eq.aMid}, aigus ${eq.aHi} dB`; } }
   return {weakLo, rewind, eq, keepLo, match, matchTxt, swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
@@ -2727,6 +2727,12 @@ function startTransition(dt){
   // Bien calé (B1 et B2 lus au kick) : A garde un peu de basse au swap (-14 dB), qui descend en 32 temps → transition plus pleine, pas de trou
   const keepLo = plan.keepLo && plan.synced && !plan.swapBeats && plan.snap && plan.snap.B2_sort_ms != null && plan.snap.B1_entre_ms != null;
   if (plan.swapBeats && plan.weakLo != null) schedule(n, 'lo', plan.weakLo, tDrop, 0.08);   // B1 sans vraie basse : ses basses dosées (pas coupées net) avec celles de A
+  // Arrivée harmonisée : sur les 4 (ou 2) derniers temps avant B1, le fader de B est déjà en haut et ses basses montent en douceur,
+  // celles de A commencent à descendre → au drop les deux basses se passent le relais sans transition sèche
+  if (!plan.swapBeats && plan.synced){ const pre = L >= 16 ? 4 : 2;
+    schedule(n, 'vol', 100, tDrop - pre * beat, 0.25);
+    schedule(n, 'lo', -14, tDrop - pre * beat, beat * 0.7); schedule(n, 'lo', -7, tDrop - (pre / 2) * beat, beat * 0.5);
+    schedule(o, 'lo', -3, tDrop - (pre / 2) * beat, beat * 0.5); }
   schedule(n, 'lo', 0, tSwap, 0.002); schedule(o, 'lo', keepLo ? -14 : -26, tSwap, 0.002);
   if (keepLo){ const kb = plan.keepLo * 4;   // jusqu'à la 1re coupure de basse de B (au plus 32 temps), puis A coupé net
     if (kb > 16) schedule(o, 'lo', -20, tSwap + 16 * beat, 0.3);

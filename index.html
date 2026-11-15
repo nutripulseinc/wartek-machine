@@ -1005,7 +1005,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 118</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 119</p>
         </div>
         <div class="sgroup">
           <h3>Sons de départ</h3>
@@ -2533,6 +2533,14 @@ function makePlan(o, n){
     // si le break détecté tombe 1-2 mesures après un début de bloc de 16 temps et que ça retombe déjà, on coupe A pile sur l'impact
     if (cutBar != null && cutBar % 4){ const b0 = Math.floor(cutBar / 4) * 4;
       if (b0 >= 4 && cutBar - b0 <= 2 && eB[dBar + b0 + 1] != null && eB[dBar + b0 + 1] < 0.75 * refE) cutBar = b0; } }
+  // Coupure du son qui entre APRÈS sa basse de B1 (mesurée sur les vraies basses, mesure par mesure) : dès que B coupe ses basses
+  // au moins 2 mesures d'affilée, A ne continue pas « dans l'ombre » — il part en écho et en fondu sur le début de la coupure.
+  if (synced && I > 0){ const bd = bStart + I * nb, lim = Math.min(cutBars + tailBars, 64), lv = [];
+    for (let k = 0; k <= lim + 2; k++) lv.push(lowLevel(n.item, bd + k * 4 * nb, bd + (k + 1) * 4 * nb) || 0);
+    const ref = [...lv.slice(0, 8)].sort((a, b) => a - b)[4];
+    if (ref > 0) for (let k = 4; k < lim; k++){
+      if (lv[k] < 0.3 * ref && lv[k + 1] < 0.3 * ref){ let kk = k; const b0 = Math.floor(k / 4) * 4; if (k % 4 && k - b0 <= 2 && lv[b0 + 1] < 0.6 * ref) kk = b0;
+        if (cutBar == null || kk < cutBar) cutBar = kk; break; } } }
   let stopBars = cutBar != null ? cutBar : cutBars + tailBars;
   // B1 du son qui entre nettement moins fort que la basse de A (B2) ? Alors A GARDE sa basse au drop (une des deux basses
   // doit toujours taper) et le swap des basses attend que B ait une vraie grosse basse (par blocs de 16 temps), au plus tard C.
@@ -2771,8 +2779,13 @@ function startTransition(dt){
       { const aM = Math.min(0, (plan.eq && plan.eq.aMid) || 0), aH = Math.min(-4, (plan.eq && plan.eq.aHi) || -4);   // part de l'égaliseur adapté, jamais remonté
         schedule(o, 'mid', Math.round(Math.min(aM, aM + (-9 - aM) * f)), t, tc); schedule(o, 'hi', Math.round(Math.min(aH, aH + (-10 - aH) * f)), t, tc); }
     }
-    if (tBreak != null){ schedule(o, 'vol', 0, tBreak, 0.008); plan.tFade = tBreak; plan.tEnd = tBreak + 0.3;
-      plan.sortie = `Break de ${n.id} : ${o.id} coupé net ${Math.round((tBreak - tDrop) / beat)} temps après le swap`; }
+    if (tBreak != null){
+      // B coupe : A s'arrête sur le temps, son dernier coup part en écho calé qui s'éteint en fondu (coupe propre, pas sèche)
+      schedule(o, 'fx', {name: 'echo', amt: 0.7, rate: 0.75, fb: 0.5}, tBreak - 0.5 * beat, 0.02);
+      schedule(o, 'input', 0, tBreak, 0.006);
+      for (let i = 1; i <= 4; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / 4, 1.3)), tBreak + i * beat, 0.15);
+      plan.tFade = tBreak; plan.tEnd = tBreak + 5 * beat + 0.3;
+      plan.sortie = `Coupure de ${n.id} : ${o.id} coupé sur le temps avec écho en fondu, ${Math.round((tBreak - tDrop) / beat)} temps après le swap`; }
     else if (plan.synced && Math.random() < 0.7){
       // Sortie en écho : le son se tait sur le temps et son dernier coup part en écho calé (3/4 de temps) qui s'éteint tout seul
       plan.echoOut = true;

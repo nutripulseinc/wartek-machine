@@ -1024,7 +1024,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 126</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 127</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -1188,15 +1188,19 @@ function openDB(){
 }
 function idb(store, mode, fn){
   return openDB().then(db => new Promise((res, rej) => {
-    const tx = db.transaction(store, mode); const req = fn(tx.objectStore(store));
+    // écriture « stricte » : chaque réglage est vraiment écrit sur le disque avant d'être confirmé (rien de perdu si l'appli est tuée)
+    let tx; try { tx = mode === 'readwrite' ? db.transaction(store, mode, {durability: 'strict'}) : db.transaction(store, mode); } catch(e){ tx = db.transaction(store, mode); }
+    const req = fn(tx.objectStore(store));
     tx.oncomplete = () => res(req ? req.result : undefined); tx.onerror = tx.onabort = () => rej(tx.error);
   }));
 }
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
-let storeWarned = false;
+let storeWarned = false; const saveErr = {n: 0, last: null};
+// Demande au téléphone de ne jamais effacer la bibliothèque tout seul (sinon Chrome peut la vider s'il manque de place)
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch(e){}
 async function saveTrack(t){
   try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file, markers: t.markers || null, style: t.style || null, genreTried: !!t.genreTried, ana: t.ana || null})); }
-  catch(e){ if (!storeWarned){ storeWarned = true; toast('Plus de place pour garder tes morceaux : ceux-là seront à réimporter la prochaine fois.'); } }
+  catch(e){ saveErr.n++; saveErr.last = (e && (e.name || e.message)) || '?'; if (!storeWarned){ storeWarned = true; toast(`Enregistrement impossible (${saveErr.last}) : les réglages de ce son risquent de ne pas être gardés.`, 6000); } }
 }
 // Marqueurs posés à la main, à l'endroit où joue la platine (calés sur le temps ou la mesure)
 function setMarker(d, kind){
@@ -3051,7 +3055,7 @@ function edFit(cv){ const r = cv.getBoundingClientRect(), w = Math.max(10, Math.
 // Les calculs lourds de l'éditeur (validation, glissement, coupures) se font juste après l'affichage, un par un :
 // l'éditeur s'ouvre tout de suite et reste fluide, le texte se complète une fraction de seconde après
 function edLater(fn){ (edLater.q = edLater.q || []).push(fn); if (edLater.on) return; edLater.on = true;
-  const step = () => { const f = edLater.q.shift(); if (!f){ edLater.on = false; if (ED.t) edDraw(); return; } try { f(); } catch(e){} setTimeout(step, 0); }; setTimeout(step, 30); }
+  const step = () => { const f = edLater.q.shift(); if (!f){ edLater.on = false; if (ED.t && ED.t.buffer && !$('editor').hidden) edDraw(); return; } try { f(); } catch(e){} setTimeout(step, 0); }; setTimeout(step, 30); }
 function edDraw(){
   const t = ED.t; if (!t || $('editor').hidden) return;
   const dur = t.buffer.duration, T = edT();
@@ -3821,8 +3825,10 @@ $('qp-ok').addEventListener('click', () => {
 });
 document.addEventListener('click', e => { const b = e.target.closest('[data-qpick]'); if (b) openQPick(b.dataset.qpick); });
 $('lib-file').addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; if (files.length){ addFiles(files); renderLib(); } });
+let STORE_EST = null;
 $('diag-copy').addEventListener('click', async () => {
-  const txt = 'RAPPORT WARTEK MACHINE\n' + JSON.stringify({ua: navigator.userAgent, platines: {A: diagTrack(decks.A), B: diagTrack(decks.B)}, mix: DIAG.length ? DIAG : 'aucun mix terminé', en_cours: plan ? {sort: diagTrack(plan.o), entre: diagTrack(plan.n), oreille_ms: plan.earLog || []} : null}, null, 1);
+  try { const e = await navigator.storage.estimate(), p = navigator.storage.persisted ? await navigator.storage.persisted() : null; STORE_EST = {utilise_mo: Math.round(e.usage / 1e6), max_mo: Math.round(e.quota / 1e6), protege: p}; } catch(e){}
+  const txt = 'RAPPORT WARTEK MACHINE\n' + JSON.stringify({ua: navigator.userAgent, platines: {A: diagTrack(decks.A), B: diagTrack(decks.B)}, bibliotheque: {sons: lib.filter(t => t.id).length, analyse_gardee: lib.filter(t => t.id && t.ana).length, verifies: lib.filter(t => t.id && isChecked(t)).length, decodes_en_memoire: lib.filter(t => t.buffer).length, erreurs_enregistrement: saveErr.n, derniere_erreur: saveErr.last, stockage: STORE_EST}, mix: DIAG.length ? DIAG : 'aucun mix terminé', en_cours: plan ? {sort: diagTrack(plan.o), entre: diagTrack(plan.n), oreille_ms: plan.earLog || []} : null}, null, 1);
   try { await navigator.clipboard.writeText(txt); toast('Rapport copié : colle-le dans la conversation avec Claude.'); }
   catch(e){ const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Rapport copié.'); } catch(_){ toast('Copie impossible ici.'); } ta.remove(); }
 });
@@ -3859,8 +3865,18 @@ function levelTrim(buf){
   const trim = Math.min(1.6, 0.25 / Math.max(loud, 1e-4), 0.7 / Math.max(peak, 1e-4));
   return {trim, peakDb: 20 * Math.log10(peak + 1e-9), loudDb: 20 * Math.log10(loud + 1e-9)};
 }
-const ANAVER = 1, ANA_KEYS = ['gainTrim', 'lvlInfo', 'bpm', 'firstBeat', 'start', 'env', 'envRate', 'peaks', 'tempoFixed', 'kickFix', 'fitInfo', 'combConf', 'combInfo', 'dbInfo', 'autoStart', 'autoBpm', 'autoFb'];
-async function prepItem(t){
+const ANAVER = 1, ANA_KEYS = ['gainTrim', 'lvlInfo', 'bpm', 'firstBeat', 'start', 'env', 'envRate', 'tempoFixed', 'kickFix', 'fitInfo', 'combConf', 'combInfo', 'dbInfo', 'autoStart', 'autoBpm', 'autoFb'];
+// MÉMOIRE : un son décodé prend ~50 Mo (5 min). On ne garde décodés que les sons sur les platines et celui ouvert dans
+// l'éditeur ; les autres gardent seulement leur analyse et sont redécodés (1-2 s) quand on les charge. Sans ça,
+// vérifier 20 sons d'affilée remplissait la mémoire du téléphone → écran figé puis appli tuée.
+function freeBuffers(){
+  const keep = new Set(Object.values(decks).map(d => d.item).filter(Boolean));
+  if (ED.t && !$('editor').hidden) keep.add(ED.t);
+  for (const t of lib){ if (t.buffer && t.file && t.bpm && !t._busy && !keep.has(t)){ t.buffer = null; t.peaks = null; if (t.ana && t.ana.comb) t._comb = null; } }
+}
+setInterval(freeBuffers, 3000);
+async function prepItem(t){ freeBuffers(); t._busy = (t._busy || 0) + 1; try { return await prepItem0(t); } finally { t._busy--; } }
+async function prepItem0(t){
     if (!t.buffer) t.buffer = await decode(await t.file.arrayBuffer());
     if (t.gainTrim == null){ const lv = levelTrim(t.buffer); t.gainTrim = lv.trim; t.lvlInfo = lv; }
     if (!t.bpm){

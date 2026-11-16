@@ -1024,7 +1024,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 125</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 126</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -3645,7 +3645,11 @@ let BACS = STYLE_DEF.map(([n, c]) => ({n, c}));
 try { const x = JSON.parse(localStorage.getItem('wm-styles') || 'null'); if (Array.isArray(x) && x.length) BACS = x; } catch(e){}
 const saveStyles = () => { try { localStorage.setItem('wm-styles', JSON.stringify(BACS)); } catch(e){} };
 const styCol = n => (BACS.find(x => x.n === n) || {c: '#7a8a90'}).c;
-function guessStyle(t){ const b = t.bpm; if (!b) return null;
+// BPM connu sans recharger le son : celui de la platine, sinon le BPM vérifié à la main, sinon l'analyse gardée en mémoire
+// → au démarrage, les bacs (Uptempo, Hardstyle…) et les BPM de la liste sont là tout de suite, sans attendre que tout se recharge
+function bpmOf(t){ return (t && (t.bpm || (t.markers && t.markers.bpm) || (t.ana && t.ana.bpm))) || 0; }
+const bpmTxt = t => { const b = bpmOf(t); return b ? b.toFixed(1) + ' BPM' : '— BPM'; };
+function guessStyle(t){ const b = bpmOf(t); if (!b) return null;
   return b >= 215 ? 'Speedcore' : b >= 186 ? 'Uptempo' : b >= 166 ? 'Hardcore' : b >= 145 && b <= 165 ? 'Hardstyle' : b >= 118 && b <= 132 ? 'House' : b >= 70 && b <= 105 ? 'Rap' : null; }
 function styleOf(t){ if (t.style) return {n: t.style, sure: true}; const g = guessStyle(t); return g ? {n: g, sure: false} : null; }
 const inFilter = t => { if (!STY.filter) return true; const s = styleOf(t); return !!s && s.n === STY.filter; };
@@ -3704,7 +3708,7 @@ function renderLib(){
     <span class="i">${STY.classer ? `<span class="ck2">${STY.sel.includes(t) ? '☑' : '☐'}</span>` : i + 1}</span>
     <span class="n">${esc(t.name)}</span>
     ${styBadge(t, i)}
-    <span class="m">${t.bpm ? t.bpm.toFixed(1) + ' BPM' : '— BPM'}</span>
+    <span class="m">${bpmTxt(t)}</span>
     <span class="m">${t.struct ? 'drop ' + fmt(t.struct.drop, 0) : 'à analyser'}</span>
     <button class="dbtn" data-up="${i}" aria-label="Monter dans la playlist" ${i === 0 ? 'disabled' : ''}>↑</button>
     <button class="dbtn" data-del="${i}" aria-label="Retirer de la playlist">✕</button>
@@ -3782,7 +3786,7 @@ function renderQPick(){
   renderSbar('qp-sbar');
   $('qp-list').innerHTML = lib.map((t, i) => { const k = qpSel.indexOf(t); if (!inFilter(t)) return '';
     return `<li data-qp="${i}" role="checkbox" aria-checked="${k >= 0}" class="${d.queue.includes(t) || d.item === t ? 'inq' : ''}">
-      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${styDot(t)}${esc(t.name)}${isChecked(t) ? ' <span class="ok">✓</span>' : ''}${doubtTxt(t)}</span><span class="m">${t.bpm ? t.bpm.toFixed(1) + ' BPM' : '— BPM'}</span><button class="qe" data-qe="${i}" aria-label="Vérifier ce son dans l'éditeur">✎ Vérifier</button></li>`; }).join('')
+      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${styDot(t)}${esc(t.name)}${isChecked(t) ? ' <span class="ok">✓</span>' : ''}${doubtTxt(t)}</span><span class="m">${bpmTxt(t)}</span><button class="qe" data-qe="${i}" aria-label="Vérifier ce son dans l'éditeur">✎ Vérifier</button></li>`; }).join('')
     + '<li class="dnote">Touche les sons dans l\'ordre où tu veux les jouer (le numéro = l\'ordre), puis « Ajouter ». « Du téléphone » importe de nouveaux fichiers : sur le téléphone, appuie longuement sur un fichier pour en cocher plusieurs.<br>✎ Vérifier : ouvre le son dans l\'éditeur pour contrôler K, B1, B2, C, F avant le mix. « Vérifier » en haut : passe un à un les sons cochés (ou, sans coche, ceux de la file pas encore vérifiés). ✓ = son vérifié.</li>';
   const n = qpSel.length, ok = $('qp-ok');
   ok.disabled = !n; ok.textContent = n ? `Ajouter (${n})` : 'Ajouter';

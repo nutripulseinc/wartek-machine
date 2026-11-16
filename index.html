@@ -1024,7 +1024,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 127</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 128</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -2416,6 +2416,35 @@ function lowLevel(t, t0, t1){
     for (let i = i0; i < i1; i++){ y1 += a * ((L[i] + R[i]) * 0.5 - y1); y2 += a * (y1 - y2); acc += y2 * y2; }
     return Math.sqrt(acc / (i1 - i0)) * (t.gainTrim ?? 1) * (t.mixTrim ?? 1); } catch(e){ return null; }
 }
+// Basses sur un court moment (un temps) : même mesure que lowLevel, sans le minimum d'une seconde
+function lowBeat(t, t0, t1){
+  try { const b = t.buffer, sr = b.sampleRate, i0 = Math.max(0, Math.floor(t0 * sr)), i1 = Math.min(b.length, Math.floor(t1 * sr));
+    if (i1 - i0 < 0.05 * sr) return null; const L = b.getChannelData(0), R = b.numberOfChannels > 1 ? b.getChannelData(1) : L;
+    const a = 1 - Math.exp(-2 * Math.PI * 150 / sr); let y1 = 0, y2 = 0, acc = 0;
+    for (let i = Math.max(0, i0 - Math.floor(0.02 * sr)); i < i1; i++){ y1 += a * ((L[i] + R[i]) * 0.5 - y1); y2 += a * (y1 - y2); if (i >= i0) acc += y2 * y2; }
+    return Math.sqrt(acc / (i1 - i0)); } catch(e){ return null; }
+}
+// Début EXACT d'un break du son qui entre, au temps près (la détection mesure par mesure peut tomber 1 ou 2 mesures trop tard
+// quand la queue de la basse / un impact traîne) : on cherche le premier temps à partir duquel les basses restent tombées
+// 4 temps d'affilée et jusqu'au break. Si ce temps suit un impact sur le 1er temps de la mesure, on coupe sur l'impact. Jamais plus tard que prévu.
+function breakBeat(n, bd, nb, cutBar){
+  const k1 = Math.round(cutBar * 4), from = Math.max(8, k1 - 12), lv = [];
+  for (let j = from - 16; j <= k1 + 8; j++) lv[j] = lowBeat(n, bd + j * nb, bd + (j + 1) * nb);
+  const before = []; for (let j = from - 16; j < from; j++) if (lv[j] != null) before.push(lv[j]);
+  if (before.length < 8) return null;
+  const ref = before.sort((a, b) => a - b)[Math.floor(before.length * 0.6)]; if (!(ref > 0)) return null;
+  for (let j = from; j <= k1; j++){
+    // 4 temps nettement tombés, puis ça RESTE bas jusqu'au break détecté (sinon c'est juste un petit trou de fin de bloc : on ne coupe pas)
+    let ok = true; for (let q = 0; q < 4; q++){ const v = lv[j + q]; if (v == null || v >= 0.4 * ref){ ok = false; break; } }
+    if (ok) for (let q = j + 4; q <= k1 + 3; q++){ const v = lv[q]; if (v == null || v >= 0.5 * ref){ ok = false; break; } }
+    if (!ok) continue;
+    let c = j;
+    if (j % 4 === 1 && lv[j - 1] != null) c = j - 1;                                  // impact sur le 1er temps, puis tout retombe
+    else if (j % 4 && j % 4 <= 2 && lv[j - j % 4] != null && lv[j - j % 4 + 1] < 0.7 * ref) c = j - j % 4;   // la basse s'éteint dans la mesure : on part de son début
+    return Math.min(c, k1) / 4;
+  }
+  return null;
+}
 // Niveau RÉEL (toutes fréquences, gain du morceau compris) entre t0 et t1
 function fullLevel(t, t0, t1){
   try { const b = t.buffer, sr = b.sampleRate, i0 = Math.max(0, Math.floor(t0 * sr)), i1 = Math.min(b.length, Math.floor(t1 * sr));
@@ -2593,6 +2622,10 @@ function makePlan(o, n){
           let ok = true; for (let q = 0; q < 4; q++) if (eB[dBar + k + q] >= 0.4 * ref2){ ok = false; break; }
           if (ok){ cutBar = k % 4 && k - Math.floor(k / 4) * 4 <= 2 ? Math.floor(k / 4) * 4 : k; break; } }
         stopBars = cutBar != null ? cutBar : cutBars + tailBars; }
+  // Break du son qui entre : point de coupe affiné au temps près (jamais plus tard que la détection par mesures)
+  let breakFine = null;
+  if (synced && cutBar != null && I > 0){ const bb = breakBeat(n.item, bDropT, nb, cutBar);
+    if (bb != null && bb < cutBar - 0.01){ breakFine = `break de ${n.id} avancé de ${Math.round((cutBar - bb) * 4)} temps (début réel des basses coupées)`; cutBar = bb; stopBars = cutBar; } }
   // Trick DJ : à la petite coupure de fin des 32 premiers temps ensemble, on laisse A seul (voir startTransition)
   // Deux tricks possibles : fin des 32 premiers temps ensemble, puis fin des 32 suivants (temps 33 à 64)
   const trick = [];
@@ -2620,7 +2653,7 @@ function makePlan(o, n){
       eq = {bLo: r1(clamp((ra.lo - rb.lo) * 0.7, -4, 4)), bMid: r1(clamp((ra.mid - rb.mid) * 0.7, -4, 4)), bHi: r1(clamp((ra.hi - rb.hi) * 0.7, -4, 4)),
             aMid: r1(clamp(-2 - (A.mid - B.mid) * 0.6, -8, 0)), aHi: r1(clamp(-2 - (A.hi - B.hi) * 0.6, -8, 0))};
       eq.txt = `${n.id} : graves ${eq.bLo >= 0 ? '+' : ''}${eq.bLo}, médiums ${eq.bMid >= 0 ? '+' : ''}${eq.bMid}, aigus ${eq.bHi >= 0 ? '+' : ''}${eq.bHi} dB · ${o.id} pendant B1/B2 : médiums ${eq.aMid}, aigus ${eq.aHi} dB`; } }
-  return {weakLo, rewind, eq, keepLo, match, matchTxt, swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+  return {breakFine, weakLo, rewind, eq, keepLo, match, matchTxt, swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + stopBars * 4 + 8, trick, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
@@ -2815,11 +2848,12 @@ function startTransition(dt){
     }
     if (tBreak != null){
       // B coupe : A s'arrête sur le temps, son dernier coup part en écho calé qui s'éteint en fondu (coupe propre, pas sèche)
-      schedule(o, 'fx', {name: 'echo', amt: 0.7, rate: 0.75, fb: 0.5}, tBreak - 0.5 * beat, 0.02);
+      // (écho COURT : la queue s'éteint en 2 temps — avant, 4 temps d'écho donnaient l'impression que A continuait sans basse sur la montée)
+      schedule(o, 'fx', {name: 'echo', amt: 0.5, rate: 0.75, fb: 0.35}, tBreak - 0.5 * beat, 0.02);
       schedule(o, 'input', 0, tBreak, 0.006);
-      for (let i = 1; i <= 4; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / 4, 1.3)), tBreak + i * beat, 0.15);
-      plan.tFade = tBreak; plan.tEnd = tBreak + 5 * beat + 0.3;
-      plan.sortie = `Coupure de ${n.id} : ${o.id} coupé sur le temps avec écho en fondu, ${Math.round((tBreak - tDrop) / beat)} temps après le swap`; }
+      schedule(o, 'vol', 45, tBreak + 0.5 * beat, 0.1); schedule(o, 'vol', 15, tBreak + beat, 0.12); schedule(o, 'vol', 0, tBreak + 2 * beat, 0.15);
+      plan.tFade = tBreak; plan.tEnd = tBreak + 3 * beat + 0.3;
+      plan.sortie = `Coupure de ${n.id} : ${o.id} coupé net sur le temps (écho court 2 temps), ${Math.round((tBreak - tDrop) / beat)} temps après le swap${plan.breakFine ? ' · ' + plan.breakFine : ''}`; }
     else if (plan.synced && Math.random() < 0.7){
       // Sortie en écho : le son se tait sur le temps et son dernier coup part en écho calé (3/4 de temps) qui s'éteint tout seul
       plan.echoOut = true;

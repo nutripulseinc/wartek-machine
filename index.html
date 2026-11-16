@@ -1024,7 +1024,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 128</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 129</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -2624,8 +2624,18 @@ function makePlan(o, n){
         stopBars = cutBar != null ? cutBar : cutBars + tailBars; }
   // Break du son qui entre : point de coupe affiné au temps près (jamais plus tard que la détection par mesures)
   let breakFine = null;
+  // Souvent la ligne de basse (kicks) s'arrête AVANT que tout tombe : il reste 2-3 mesures de sub / nappe grave qui s'éteint
+  // (ex. Act of God : basse à 100 %, puis 65 % sans kick pendant 3 mesures, puis 20 %). Pour l'oreille la montée commence
+  // là où la basse a lâché : on remonte jusqu'à 4 mesures en arrière tant que la basse reste nettement en dessous de la ligne
+  // de basse, et on coupe sur le début du bloc (16 temps) le plus proche. Seulement quand un vrai break suit juste derrière.
+  if (synced && cutBar != null && I > 0){ const kc = Math.floor(cutBar), lvb = k => lowLevel(n.item, bDropT + k * 4 * nb, bDropT + (k + 1) * 4 * nb);
+    const pre = []; for (let k = Math.max(0, kc - 12); k < kc - 4; k++){ const v = lvb(k); if (v != null) pre.push(v); }
+    if (pre.length >= 3){ const ref = pre.sort((a, b) => a - b)[Math.floor(pre.length * 0.6)];
+      let st = kc; for (let k = kc - 1; k >= Math.max(1, kc - 4); k--){ const v = lvb(k); if (v != null && v < 0.72 * ref) st = k; else break; }
+      if (st < kc){ const blk = Math.ceil(st / 4) * 4, c = st % 4 ? (blk < kc ? blk : kc) : st;   // seulement vers un début de bloc : une mesure de fill juste avant ne compte pas
+        if (c < cutBar){ breakFine = `basse de ${n.id} lâchée ${Math.round((cutBar - c) * 4)} temps avant le break complet`; cutBar = c; stopBars = cutBar; } } } }
   if (synced && cutBar != null && I > 0){ const bb = breakBeat(n.item, bDropT, nb, cutBar);
-    if (bb != null && bb < cutBar - 0.01){ breakFine = `break de ${n.id} avancé de ${Math.round((cutBar - bb) * 4)} temps (début réel des basses coupées)`; cutBar = bb; stopBars = cutBar; } }
+    if (bb != null && bb < cutBar - 0.01){ breakFine = (breakFine ? breakFine + ' · ' : '') + `break de ${n.id} avancé de ${Math.round((cutBar - bb) * 4)} temps (début réel des basses coupées)`; cutBar = bb; stopBars = cutBar; } }
   // Trick DJ : à la petite coupure de fin des 32 premiers temps ensemble, on laisse A seul (voir startTransition)
   // Deux tricks possibles : fin des 32 premiers temps ensemble, puis fin des 32 suivants (temps 33 à 64)
   const trick = [];
@@ -2776,12 +2786,16 @@ function startTransition(dt){
   const aR = barRms(o.item), aRs = [...aR].sort((x, y) => x - y), aRef = aRs[Math.floor(aRs.length * 0.75)] || 1e-9, aBar = 4 * o.beatLen;
   const aLvl = pos => { const k = Math.floor((pos - o.item.firstBeat) / aBar); const v = aR[Math.max(0, Math.min(aR.length - 1, k))] || 0; return clamp(v / aRef, 0, 1); };
   const dyn = pos => 0.3 + 0.7 * Math.pow(aLvl(pos), 1.3);   // 1 = A plein ; ~0.3 = A presque silencieux
-  { const d0 = dyn(plan.oldStart), v0 = Math.round(42 * d0); paramAt(n, 'vol', v0, now, 0.01); n.ctl.vol.set(v0, false);
-    plan.entree = `départ de ${n.id} à ${v0} % (niveau de ${o.id} : ${Math.round(aLvl(plan.oldStart) * 100)} %)`; }
-  for (let i = 1; i < L; i++){
-    const f = i / L, t = T0 + i * beat, dk = dyn(plan.oldStart + i * o.beatLen);
-    schedule(n, 'vol', Math.round((42 + 46 * f) * dk), t, 0.12);
-    if (i % 4 === 0){ schedule(n, 'mid', Math.round(-9 + 8 * f), t, 0.08); schedule(n, 'hi', Math.round(-5 + 5 * f), t, 0.08); if (!plan.swapBeats) schedule(o, 'hi', Math.round(-4 * f), t, 0.08); }
+  // Longue intro (plus de 32 temps avant B1) : B tourne calé mais fader FERMÉ, puis le fader monte temps par temps
+  // seulement sur les 32 derniers temps → l'intro de B « envoie » vers le drop au lieu de traîner faiblement en fond.
+  const R0 = L > 32 ? L - 32 : 0, RL = L - R0;
+  { const d0 = dyn(plan.oldStart), v0 = R0 ? 0 : Math.round(42 * d0); paramAt(n, 'vol', v0, now, 0.01); n.ctl.vol.set(v0, false);
+    plan.entree = R0 ? `${n.id} lancé fader fermé (intro de ${Math.round(L)} temps), fader monté temps par temps sur les 32 derniers temps avant B1`
+      : `départ de ${n.id} à ${v0} % (niveau de ${o.id} : ${Math.round(aLvl(plan.oldStart) * 100)} %)`; }
+  for (let i = Math.max(1, R0); i < L; i++){
+    const f = (i - R0) / RL, t = T0 + i * beat, dk = dyn(plan.oldStart + i * o.beatLen);
+    schedule(n, 'vol', Math.round(R0 ? (14 + 86 * Math.pow(f, 0.85)) * (0.65 + 0.35 * dk) : (42 + 46 * f) * dk), t, R0 && i === R0 ? 0.3 : 0.12);
+    if ((i - R0) % 4 === 0){ schedule(n, 'mid', Math.round(-9 + 8 * f), t, 0.08); schedule(n, 'hi', Math.round(-5 + 5 * f), t, 0.08); if (!plan.swapBeats) schedule(o, 'hi', Math.round(-4 * f), t, 0.08); }
   }
   // Bass swap : sur le temps fort, basses de A coupées net et basses de B libérées, instantanément
   const tSwap = tDrop + (plan.swapBeats || 0) * beat;   // = tDrop, sauf si B1 est trop faible : A garde sa basse jusque-là

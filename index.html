@@ -1053,7 +1053,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 132</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 133</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -1153,26 +1153,21 @@ let ctx; try { ctx = new AC({latencyHint: MOBILE ? 0.08 : 'playback'}); } catch(
 const gain = v => { const g = ctx.createGain(); g.gain.value = v; return g; };
 const masterBus = gain(1);
 const limiter = ctx.createDynamicsCompressor();
-limiter.threshold.value = -4; limiter.knee.value = 3; limiter.ratio.value = 20;   // sécurité : plafond ≈ -4 dB, transparent en dessous limiter.attack.value = 0.004; limiter.release.value = 0.25;
+limiter.threshold.value = -2; limiter.knee.value = 1; limiter.ratio.value = 20; limiter.attack.value = 0.002; limiter.release.value = 0.12;   // sécurité : plafond ≈ -4 dB, transparent en dessous limiter.attack.value = 0.004; limiter.release.value = 0.25;
 const masterAn = ctx.createAnalyser(); masterAn.fftSize = 2048;   // 23 Hz par case : graves bien détaillés dans les visuels
 // Les compresseurs du navigateur remontent tout seuls le volume après compression (« makeup » automatique ≈ 0,6 × la réduction à 0 dB).
 // Ça poussait le son dans le rouge quand Auto level était allumé : on annule cette remontée, ils ne font plus que BAISSER.
 const unMakeup = (c, thr, ratio) => { const g = ctx.createGain(); g.gain.value = Math.pow(10, -0.6 * (-(thr + (-thr) / ratio)) / 20); c.connect(g); return g; };
-const limOut = unMakeup(limiter, -4, 20);
+const limOut = unMakeup(limiter, -2, 20);
 limOut.connect(masterAn);
-// Auto level : le son est séparé en basses / médiums / aigus. Si une bande pousse dans le rouge,
-// elle seule est baissée automatiquement, puis remonte quand ça se calme.
-const lr4 = (type, f) => { const a = ctx.createBiquadFilter(), b = ctx.createBiquadFilter(); a.type = b.type = type; a.frequency.value = b.frequency.value = f; a.Q.value = b.Q.value = Math.SQRT1_2; a.connect(b); return [a, b]; };
-const bandComp = (thr, att) => { const c = ctx.createDynamicsCompressor(); c.threshold.value = thr; c.knee.value = 6; c.ratio.value = 6; c.attack.value = att; c.release.value = 0.35; return c; };
-const xLow = lr4('lowpass', 200), xRest = lr4('highpass', 200), xMid = lr4('lowpass', 3200), xHigh = lr4('highpass', 3200);
-const cLow = bandComp(-9, 0.012), cMid = bandComp(-11, 0.006), cHigh = bandComp(-14, 0.003);
-const bandsIn = gain(1), bandsOut = gain(0.68);   // (reste de remontée automatique mesuré : -3,3 dB, pour qu'Auto level ne soit jamais plus fort que sans)
-bandsIn.connect(xLow[0]); xLow[1].connect(cLow); unMakeup(cLow, -9, 6).connect(bandsOut);
-bandsIn.connect(xRest[0]); xRest[1].connect(xMid[0]); xRest[1].connect(xHigh[0]);
-xMid[1].connect(cMid); unMakeup(cMid, -11, 6).connect(bandsOut); xHigh[1].connect(cHigh); unMakeup(cHigh, -14, 6).connect(bandsOut);
-bandsOut.connect(limiter);
+// Auto level (refait) : l'ancien compresseur 3 bandes écrasait les médiums / aigus → son étouffé et nettement plus bas.
+// Maintenant : petite poussée (+5 dB) → « colle » très douce (ratio 1,8, attaque lente : les kicks passent) → limiteur
+// rapide qui empêche juste d'aller dans le rouge (plafond ≈ -1,5 dB). Le son garde son éclat, en un peu plus fort.
+const alPush = gain(Math.pow(10, 5 / 20));
+const glue = ctx.createDynamicsCompressor(); glue.threshold.value = -12; glue.knee.value = 12; glue.ratio.value = 1.8; glue.attack.value = 0.02; glue.release.value = 0.25;
+alPush.connect(glue); unMakeup(glue, -12, 1.8).connect(limiter);
 let autoLevel = true;
-function setAutoLevel(on){ autoLevel = on; try { masterBus.disconnect(); } catch(e){} masterBus.connect(on ? bandsIn : limiter); }
+function setAutoLevel(on){ autoLevel = on; try { masterBus.disconnect(); } catch(e){} masterBus.connect(on ? alPush : limiter); }
 setAutoLevel(true);
 const cueBus = gain(1), cueToHp = gain(1), masterToHp = gain(0), hpSum = gain(0.8);
 const hpAn = ctx.createAnalyser(); hpAn.fftSize = 1024;
@@ -2071,7 +2066,7 @@ center[3].innerHTML = '<div class="cbtns"><button class="mini on" id="autolvl" a
 $('autolvl').addEventListener('click', () => {
   setAutoLevel(!autoLevel);
   $('autolvl').classList.toggle('on', autoLevel); $('autolvl').setAttribute('aria-pressed', String(autoLevel));
-  toast(autoLevel ? 'Auto level activé : basses, médiums et aigus baissent seuls s\'ils partent dans le rouge.' : 'Auto level coupé : seul le limiteur de sécurité reste actif.', 3600);
+  toast(autoLevel ? 'Auto level activé : son un peu poussé, jamais dans le rouge, petite impulsion de basse au drop du son qui arrive.' : 'Auto level coupé : seul le limiteur de sécurité reste actif.', 3600);
 });
 
 let hpHintShown = false, isoHintShown = false;
@@ -2848,7 +2843,12 @@ function startTransition(dt){
   o.lo.frequency.setValueAtTime(320, Math.max(ctx.currentTime, tSwap - 0.01));
   { const q = plan.eq || {bLo: 0, bMid: 0, bHi: 0, aMid: 0, aHi: 0};
     schedule(n, 'vol', 100, tDrop, 0.02); schedule(n, 'mid', q.bMid, tDrop, 0.02); schedule(n, 'hi', q.bHi, tDrop, 0.02);
-    if (q.bLo) schedule(n, 'lo', q.bLo, tSwap + 0.01, 0.05);
+    // Auto level : petite « impulsion » de basse sur le son qui arrive (+2,5 dB au swap), qui redescend en douceur
+    // sur 32 temps → le drop claque, puis le niveau se régule normalement. Pas si B1 n'a pas de vraie basse (dosage à part).
+    if (autoLevel && plan.weakLo == null && plan.synced){ const b0 = q.bLo || 0;
+      schedule(n, 'lo', Math.min(4, b0 + 2.5), tSwap + 0.01, 0.05); schedule(n, 'lo', b0 + 1.2, tSwap + 16 * beat, 2 * beat); schedule(n, 'lo', b0, tSwap + 32 * beat, 3 * beat);
+      plan.bassPunch = true; }
+    else if (q.bLo) schedule(n, 'lo', q.bLo, tSwap + 0.01, 0.05);
     if (q.aMid || q.aHi){ schedule(o, 'mid', q.aMid, tSwap, 0.3); schedule(o, 'hi', Math.min(q.aHi, -4), tSwap, 0.3); } }
   const bar = 4 * beat, st = plan.style[0], pre8 = Math.max(now + 0.05, tDrop - 8 * beat), n8 = Math.round((tDrop - pre8) / beat);
   // Coup de CFX sur A à chaque transition, sur ses 8 derniers temps : un mix sur deux dans les aigus (passe-haut),
@@ -4184,10 +4184,10 @@ function drawMasterMeters(m, h){
     g.globalAlpha = 1;
   });
   // Réduction automatique par bande (0 à -12 dB)
-  const y = 2 * (rowH + 4), seg = (W - lab) / 3;
+  const y = 2 * (rowH + 4), seg = (W - lab) / 3;   // 2 jauges, chacune sur 1,5 case
   g.fillStyle = autoLevel ? '#20e6e8' : '#1f4a4e'; g.fillText('AL', 0, y + rowH / 2);
-  [['B', cLow], ['M', cMid], ['A', cHigh]].forEach(([t, c], i) => {
-    const x0 = lab + i * seg, red = autoLevel ? Math.min(12, -c.reduction) : 0, bw = seg - 22 * dpr();
+  [['C', glue], ['L', limiter]].forEach(([t, c], i) => {   // C = colle douce, L = limiteur anti-rouge
+    const x0 = lab + i * seg * 1.5, red = autoLevel ? Math.min(12, -c.reduction) : 0, bw = seg * 1.5 - 22 * dpr();
     g.fillStyle = '#4fb3b8'; g.fillText(t, x0, y + rowH / 2);
     g.fillStyle = '#0b2226'; g.fillRect(x0 + 12 * dpr(), y, bw, rowH);
     g.fillStyle = red > 6 ? C.alert : C.cue; g.fillRect(x0 + 12 * dpr(), y, bw * red / 12, rowH);

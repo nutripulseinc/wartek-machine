@@ -1027,7 +1027,7 @@ body[data-skin="psy"] .bline{visibility:hidden}
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 130</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 131</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -1202,7 +1202,7 @@ let storeWarned = false; const saveErr = {n: 0, last: null};
 // Demande au téléphone de ne jamais effacer la bibliothèque tout seul (sinon Chrome peut la vider s'il manque de place)
 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch(e){}
 async function saveTrack(t){
-  try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file, markers: t.markers || null, style: t.style || null, genreTried: !!t.genreTried, ana: t.ana || null})); }
+  try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file, markers: t.markers || null, style: t.style || null, styleSrc: t.styleSrc || null, genreTried: !!t.genreTried, ana: t.ana || null})); }
   catch(e){ saveErr.n++; saveErr.last = (e && (e.name || e.message)) || '?'; if (!storeWarned){ storeWarned = true; toast(`Enregistrement impossible (${saveErr.last}) : les réglages de ce son risquent de ne pas être gardés.`, 6000); } }
 }
 // Marqueurs posés à la main, à l'endroit où joue la platine (calés sur le temps ou la mesure)
@@ -3720,11 +3720,11 @@ function renderSbar(id){
   $(id).innerHTML = `<button class="chip" data-chip="" style="--sc:#dfe" aria-pressed="${!STY.filter}">Tous<b>${lib.length}</b></button>`
     + BACS.map(x => { const c = cnt(x.n); return `<button class="chip${c ? '' : ' zero'}" data-chip="${esc(x.n)}" style="--sc:${x.c}" aria-pressed="${STY.filter === x.n}">${esc(x.n)}<b>${c}</b></button>`; }).join('')
     + (id === 'dl-sbar' ? `<button class="chip" data-chipadd="1" style="--sc:#888">＋ Bac</button>` : ''); }
-function setStyle(list, n){ list.forEach(t => { t.style = n || null; saveTrack(t); }); }
+function setStyle(list, n){ list.forEach(t => { t.style = n || null; t.styleSrc = 'main'; saveTrack(t); }); }   // choisi à la main : jamais touché par les scans
 // Style lu dans le fichier (tag « genre » des MP3 / M4A / FLAC), une seule fois par son
 const GENRE_MAP = [[/speedcore|extratone|splittercore/i, 'Speedcore'], [/uptempo/i, 'Uptempo'], [/hardcore|gabber|frenchcore|terror/i, 'Hardcore'], [/rawstyle|raw ?hard/i, 'Rawstyle'],
   [/hardstyle|hard ?dance|euphoric/i, 'Hardstyle'], [/tribe|tekno|free ?party|hardtek/i, 'Tribe'], [/dubstep|riddim|bass music/i, 'Dubstep'], [/drum|dnb|jungle|neuro/i, 'Drum & Bass'],
-  [/house/i, 'House'], [/electro|techno|edm|trance|big ?room/i, 'Électro'], [/rap|hip.?hop|trap|drill/i, 'Rap']];
+  [/house/i, 'House'], [/\belectro(?!nic)|techno|trance|big ?room/i, 'Électro'], [/rap|hip.?hop|trap|drill/i, 'Rap']];
 async function readGenre(file){
   try { const head = new Uint8Array(await file.slice(0, 600000).arrayBuffer()), tail = file.size > 600000 ? new Uint8Array(await file.slice(file.size - 400000).arrayBuffer()) : new Uint8Array(0);
     const txt = buf => { let o = ''; for (let i = 0; i < buf.length; i++){ const c = buf[i]; o += c >= 32 && c < 127 ? String.fromCharCode(c) : c === 0 ? '\0' : ' '; } return o; };
@@ -3734,7 +3734,15 @@ async function readGenre(file){
       m = /gen[\s\S]{4}data[\s\S]{8}([A-Za-z0-9&'.\/ \-]{3,40})/.exec(s); if (m) return m[1];   // M4A
       m = /GENRE=([A-Za-z0-9&'.\/ \-]{3,40})/i.exec(s); if (m) return m[1]; }   // FLAC / OGG
   } catch(e){} return null; }
-async function genreScan(){
+async function genreFix(){
+  try { if (localStorage.getItem('wm-genre2')) return; } catch(e){ return; }
+  let changed = 0;
+  for (const t of lib){ if (t.style !== 'Électro' || t.styleSrc === 'main' || !t.file || !t.id) continue;
+    const g = await readGenre(t.file); if (g && !GENRE_MAP.some(([re, n]) => n === 'Électro' && re.test(g))){ t.style = null; saveTrack(t); changed++; } }
+  try { localStorage.setItem('wm-genre2', '1'); } catch(e){}
+  if (changed){ toast(`${changed} son${changed > 1 ? 's' : ''} sorti${changed > 1 ? 's' : ''} d'Électro (tag « Electronic » trop vague) : rangés d'après le BPM.`, 4000); if (!$('qpick').hidden) renderQPick(); if (!$('drawer').hidden) renderLib(); }
+}
+async function genreScan(){ genreFix();
   if (genreScan.busy) return; genreScan.busy = true; let changed = false;
   for (const t of lib){ if (t.style || t.genreTried || !t.file || !t.id) continue; t.genreTried = true;
     const g = await readGenre(t.file); const hit = g && GENRE_MAP.find(([re]) => re.test(g)); if (hit){ t.style = hit[1]; changed = true; } saveTrack(t); }
@@ -3745,12 +3753,13 @@ document.addEventListener('click', e => {
   if (add){ const inp = document.createElement('input'); inp.placeholder = 'Nom du bac'; inp.className = 'chip'; inp.style.cssText = 'min-width:140px;color:#fff;background:#111';
     add.replaceWith(inp); inp.focus(); const done = () => { const v = inp.value.trim(); if (v && !BACS.some(x => x.n === v)){ BACS.push({n: v, c: `hsl(${Math.floor(Math.random() * 360)} 90% 60%)`}); saveStyles(); } renderLib(); };
     inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') inp.blur(); }); inp.addEventListener('blur', done); return; }
-  if (ch && ch.closest('#sp-bar')){ const n = ch.dataset.chip; setStyle(STY.pick || [], n); $('stypick').hidden = true; STY.pick = null; renderLib(); edStyleBtn(); toast(n ? `Rangé dans « ${n} » (gardé).` : 'Style retiré.', 1800); if (!$('qpick').hidden) renderQPick(); Object.values(decks).forEach(renderQueue); return; }
+  if (ch && ch.closest('#sp-bar')){ const n = ch.dataset.chip; STY.lastPick = (STY.pick || []).length; setStyle(STY.pick || [], n); $('stypick').hidden = true; STY.pick = null; renderLib(); edStyleBtn(); { const c = (STY.lastPick || 1); toast(n ? `${c > 1 ? c + ' sons rangés' : 'Rangé'} dans « ${n} » (gardé).` : 'Style retiré.', 1800); } if (!$('qpick').hidden) renderQPick(); Object.values(decks).forEach(renderQueue); return; }
   if (ch){ const n = ch.dataset.chip || null;
     if (STY.classer && ch.closest('#dl-sbar') && n){ if (!STY.sel.length){ toast('Coche d\'abord des sons, puis touche le bac.'); return; }
       setStyle(STY.sel, n); toast(`${STY.sel.length} son${STY.sel.length > 1 ? 's' : ''} rangé${STY.sel.length > 1 ? 's' : ''} dans « ${n} ».`, 2200); STY.sel = []; renderLib(); return; }
     STY.filter = n; if (ch.closest('#qp-sbar')) renderQPick(); else renderLib(); return; }
-  const sb = e.target.closest('[data-sty]'); if (sb){ e.stopPropagation(); const t = lib[+sb.dataset.sty]; STY.pick = STY.classer && STY.sel.length ? STY.sel.slice() : [t];
+  const sb = e.target.closest('[data-sty]'); if (sb){ e.stopPropagation(); const t = lib[+sb.dataset.sty]; STY.pick = STY.classer && STY.sel.length ? STY.sel.slice()
+      : !$('qpick').hidden && sb.closest('#qp-list') && qpSel.length > 1 && qpSel.includes(t) ? qpSel.slice() : [t];   // À suivre : badge d'un son coché → tous les sons cochés
     $('sp-title').textContent = STY.pick.length > 1 ? `Ranger ${STY.pick.length} sons dans…` : `Style · ${t.name}`;
     $('sp-bar').innerHTML = BACS.map(x => `<button class="chip" data-chip="${esc(x.n)}" style="--sc:${x.c}" aria-pressed="${(styleOf(t) || {}).n === x.n}">${esc(x.n)}</button>`).join('') + `<button class="chip" data-chip="" style="--sc:#888">Sans style</button>`;
     $('sp-bar').style.flexWrap = 'wrap'; $('stypick').hidden = false; }
@@ -3845,7 +3854,7 @@ function renderQPick(){
   $('qp-list').innerHTML = lib.map((t, i) => { const k = qpSel.indexOf(t); if (!inFilter(t)) return '';
     return `<li data-qp="${i}" role="checkbox" aria-checked="${k >= 0}" class="${d.queue.includes(t) || d.item === t ? 'inq' : ''}">
       <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${styDot(t)}${esc(t.name)}${isChecked(t) ? ' <span class="ok">✓</span>' : ''}${doubtTxt(t)}</span>${styBadge(t, i)}<span class="m">${bpmTxt(t)}</span><button class="qe" data-qe="${i}" aria-label="Vérifier ce son dans l'éditeur">✎ Vérifier</button></li>`; }).join('')
-    + '<li class="dnote">Touche les sons dans l\'ordre où tu veux les jouer (le numéro = l\'ordre), puis « Ajouter ». « Du téléphone » importe de nouveaux fichiers : sur le téléphone, appuie longuement sur un fichier pour en cocher plusieurs.<br>✎ Vérifier : ouvre le son dans l\'éditeur pour contrôler K, B1, B2, C, F avant le mix. « Vérifier » en haut : passe un à un les sons cochés (ou, sans coche, ceux de la file pas encore vérifiés). ✓ = son vérifié.</li>';
+    + '<li class="dnote">Touche les sons dans l\'ordre où tu veux les jouer (le numéro = l\'ordre), puis « Ajouter ». Badge de style : touche-le pour changer le bac ; sur un son coché, ça range TOUS les sons cochés d\'un coup. « Du téléphone » importe de nouveaux fichiers : sur le téléphone, appuie longuement sur un fichier pour en cocher plusieurs.<br>✎ Vérifier : ouvre le son dans l\'éditeur pour contrôler K, B1, B2, C, F avant le mix. « Vérifier » en haut : passe un à un les sons cochés (ou, sans coche, ceux de la file pas encore vérifiés). ✓ = son vérifié.</li>';
   const n = qpSel.length, ok = $('qp-ok');
   ok.disabled = !n; ok.textContent = n ? `Ajouter (${n})` : 'Ajouter';
   const dl = $('qp-del'); dl.disabled = !n; dl.textContent = n ? `Supprimer (${n})` : 'Supprimer'; dl.classList.remove('arm');
@@ -4674,7 +4683,7 @@ applySkin(savedSkin);
     }
     for (const a in alias){ let b = alias[a]; while (alias[b]) b = alias[b]; alias[a] = b; }
     const kept = new Set([...keep.values()].map(r => r.id));
-    saved = recs.filter(r => kept.has(r.id)).map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null, style: r.style || null, genreTried: !!r.genreTried, ana: r.ana || null}));
+    saved = recs.filter(r => kept.has(r.id)).map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null, style: r.style || null, styleSrc: r.styleSrc || null, genreTried: !!r.genreTried, ana: r.ana || null}));
     saved.alias = alias;
   } catch(e){}
   const specs = [
@@ -4692,6 +4701,7 @@ applySkin(savedSkin);
       lib.push(t);
     });
     lib.unshift(...saved);
+    if (saved.length) setTimeout(() => genreFix(), 2500);   // une seule fois : libère les sons rangés en Électro par un tag « Electronic »
     try {
       const qs = await idb('samples', 'readonly', st => st.get('__queues'));
       if (qs) for (const id of ['A', 'B']){ decks[id].queue = (qs[id] || []).map(x => saved.find(t => t.id === ((saved.alias || {})[x] || x))).filter(Boolean); renderQueue(decks[id]); }

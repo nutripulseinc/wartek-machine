@@ -832,6 +832,12 @@ body[data-skin="horror"] .logo::after,body[data-skin="y90"] .logo::after{display
 body[data-skin="horror"] .logo::after{font-family:"WK Creep",serif;font-size:24px;letter-spacing:.42em;padding-left:.42em;color:#9a8a80;text-shadow:0 2px 0 #000,0 0 6px rgba(0,0,0,.9),0 0 10px rgba(150,0,15,.5);opacity:.9}
 body[data-skin="y90"] .logo::after{font-family:"Orbitron","Exo 2",sans-serif;font-weight:800;font-size:23px;letter-spacing:.5em;padding-left:.5em;filter:drop-shadow(0 0 3px #ff4fd8) drop-shadow(0 0 8px #3ad7ff);
   background:linear-gradient(180deg,#bff6ff 0%,#3ad7ff 45%,#ff4fd8 55%,#ffd1f4 100%)!important;-webkit-background-clip:text!important;background-clip:text!important;color:transparent;-webkit-text-stroke:.5px rgba(40,10,60,.6)}
+/* logos 90 et horreur ajustés : 90 un peu plus petit (même taille que les autres) et son halo ne déborde plus sur la console ;
+   horreur : WARTEK descendu et MACHINE remonté, plus serrés et centrés */
+body[data-skin="y90"] .logo{height:98px!important;background-size:auto 66%!important;background-position:center 4px!important;margin-top:0!important}
+body[data-skin="y90"] .logo::after{font-size:19px!important;bottom:4px!important;filter:drop-shadow(0 0 2px #ff4fd8) drop-shadow(0 0 4px #3ad7ff)!important}
+body[data-skin="horror"] .logo{height:100px!important;background-size:auto 70%!important;background-position:center 10px!important;margin-top:0!important}
+body[data-skin="horror"] .logo::after{bottom:8px!important}
 
 body[data-skin="psy"]{--neon:#3dffb0;--lcd:#0c0a1a;--lcd-fg:#d8ffef;--fg:#ffffff;--mute:#d8c8ff;--font-ui:"Righteous","Exo 2",sans-serif}
 html:has(body[data-skin="psy"]),body[data-skin="psy"]{background:radial-gradient(circle at 15% 20%,#3dffb0 0,transparent 30%),radial-gradient(circle at 85% 80%,#ff4fd8 0,transparent 35%),radial-gradient(circle at 80% 15%,#8b5cff 0,transparent 30%),radial-gradient(circle at 20% 85%,#20e6e8 0,transparent 30%),#2a1650}
@@ -1056,7 +1062,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 134</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 135</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -3213,7 +3219,8 @@ setInterval(async () => {
   prepItem.busy = false; Object.values(decks).forEach(renderQueue); if (!$('qpick').hidden) renderQPick();
 }, 4000);
 function isChecked(t){ return !!(t && t.markers && t.markers.ok); }
-function isDoubt(t){ return !!(t && t.bpmWarn) || (!isChecked(t) && !!(t && t.doubt && t.doubt.length)); }
+// un son vérifié et enregistré dans l'éditeur n'affiche plus d'alerte (ni repères, ni BPM) : c'est toi qui as validé
+function isDoubt(t){ return !isChecked(t) && !!(t && (t.bpmWarn || (t.doubt && t.doubt.length))); }
 const doubtTxt = t => !isDoubt(t) ? '' : t.bpmWarn && isChecked(t) ? ` <span class="qwarn" title="${t.bpmWarn}">⚠ BPM</span>` : ` <span class="qwarn" title="À vérifier : ${(t.doubt || []).join(', ')} incertain">⚠ ${[...(t.doubt || []), ...(t.bpmWarn ? ['BPM'] : [])].filter((v, i, a) => a.indexOf(v) === i).join(' ')}</span>`;
 function edStop(){ if (ED.src){ try { ED.src.stop(); } catch(e){} ED.src = null; } ED.loopAB = null; document.querySelectorAll('[data-lp]').forEach(b => b.classList.remove('on')); cancelAnimationFrame(ED.raf); $('ed-play').classList.remove('on'); $('ed-play').textContent = '▶ Écouter'; edDraw(); }
 function edPosNow(){ const L = ED.loopAB; if (L){ const len = L.b - L.a; return L.a + (((ctx.currentTime - L.t0) % len) + len) % len; } return ED.srcOff + (ctx.currentTime - ED.srcT0); }
@@ -3368,7 +3375,7 @@ $('ed-auto').addEventListener('click', () => {
 });
 $('ed-save').addEventListener('click', () => {
   const t = ED.t, d = ED.d; edStop();
-  t.bpm = ED.bpm; t.firstBeat = ED.fb; t.start = ED.m.kick ?? ED.fb; t.manualGrid = true;
+  t.bpm = ED.bpm; t.firstBeat = ED.fb; t.start = ED.m.kick ?? ED.fb; t.manualGrid = true; t.bpmWarn = null; t.gridWarn = null;
   // On ne fige que ce qui a été réglé à la main (ou l'était déjà) : le reste reste automatique
   const old = ED.reset ? {} : (t.markers || {}), nm = {};
   const gridMan = old.bpm != null || ED.touched.has('kick') || Math.abs(ED.bpm - (t.autoBpm ?? ED.bpm)) > 0.001 || Math.abs(ED.fb - (t.autoFb ?? ED.fb)) > 0.001;

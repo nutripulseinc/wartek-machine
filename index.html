@@ -293,6 +293,9 @@ button{cursor:pointer}
 #stypick{z-index:8}
 #ed-style{border-color:var(--sc,#666);color:var(--sc,inherit)}
 .dlist li.sel{background:rgba(32,230,232,.12)}.dlist li .ck2{font-size:18px;color:var(--a)}
+.fav{border:0;background:none;color:#7d8a8c;font-size:19px;line-height:1;padding:0 6px 0 0;margin:0;cursor:pointer;vertical-align:middle;min-width:0}
+.fav.on{color:#ffd23f;text-shadow:0 0 8px rgba(255,210,63,.7)}
+#qpick .dpanel{width:1200px;max-height:690px}
 .sdot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--sc);margin-right:6px;vertical-align:middle;box-shadow:0 0 6px var(--sc)}
 .dlist{list-style:none;margin:0;padding:0 18px;overflow-y:auto;touch-action:pan-y}
 .dlist li{display:grid;grid-template-columns:28px 1fr 120px 100px 96px 46px 46px 52px 52px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #222428;min-width:0}
@@ -1053,7 +1056,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 133</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 134</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -1223,7 +1226,7 @@ let storeWarned = false; const saveErr = {n: 0, last: null};
 // Demande au téléphone de ne jamais effacer la bibliothèque tout seul (sinon Chrome peut la vider s'il manque de place)
 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch(e){}
 async function saveTrack(t){
-  try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file, markers: t.markers || null, style: t.style || null, styleSrc: t.styleSrc || null, genreTried: !!t.genreTried, ana: t.ana || null})); }
+  try { await idb('tracks', 'readwrite', st => st.put({id: t.id, name: t.name, blob: t.file, markers: t.markers || null, style: t.style || null, styleSrc: t.styleSrc || null, fav: !!t.fav, genreTried: !!t.genreTried, ana: t.ana || null})); }
   catch(e){ saveErr.n++; saveErr.last = (e && (e.name || e.message)) || '?'; if (!storeWarned){ storeWarned = true; toast(`Enregistrement impossible (${saveErr.last}) : les réglages de ce son risquent de ne pas être gardés.`, 6000); } }
 }
 // Marqueurs posés à la main, à l'endroit où joue la platine (calés sur le temps ou la mesure)
@@ -3736,7 +3739,7 @@ const bpmTxt = t => { const b = bpmOf(t); return b ? b.toFixed(1) + ' BPM' : '�
 function guessStyle(t){ const b = bpmOf(t); if (!b) return null;
   return b >= 215 ? 'Speedcore' : b >= 186 ? 'Uptempo' : b >= 166 ? 'Hardcore' : b >= 145 && b <= 165 ? 'Hardstyle' : b >= 118 && b <= 132 ? 'House' : b >= 70 && b <= 105 ? 'Rap' : null; }
 function styleOf(t){ if (t.style) return {n: t.style, sure: true}; const g = guessStyle(t); return g ? {n: g, sure: false} : null; }
-const inFilter = t => { if (!STY.filter) return true; const s = styleOf(t); return !!s && s.n === STY.filter; };
+const inFilter = t => { if (!STY.filter) return true; if (STY.filter === '★') return !!t.fav; const s = styleOf(t); return !!s && s.n === STY.filter; };
 const styDot = t => { const s = styleOf(t); return s && s.sure ? `<span class="sdot" style="--sc:${styCol(s.n)}" title="${esc(s.n)}"></span>` : ''; };
 const styBadge = (t, i) => { const s = styleOf(t);
   return s ? `<button class="sty${s.sure ? '' : ' guess'}" data-sty="${i}" style="--sc:${styCol(s.n)}" title="${s.sure ? 'Changer de bac' : 'Proposé d\'après le BPM : touche pour confirmer ou changer'}">${esc(s.n)}${s.sure ? '' : ' ?'}</button>`
@@ -3744,6 +3747,7 @@ const styBadge = (t, i) => { const s = styleOf(t);
 function renderSbar(id){
   const cnt = n => lib.filter(t => { const s = styleOf(t); return s && s.n === n; }).length;
   $(id).innerHTML = `<button class="chip" data-chip="" style="--sc:#dfe" aria-pressed="${!STY.filter}">Tous<b>${lib.length}</b></button>`
+    + `<button class="chip${lib.some(t => t.fav) ? '' : ' zero'}" data-chip="★" style="--sc:#ffd23f" aria-pressed="${STY.filter === '★'}">★ Favoris<b>${lib.filter(t => t.fav).length}</b></button>`
     + BACS.map(x => { const c = cnt(x.n); return `<button class="chip${c ? '' : ' zero'}" data-chip="${esc(x.n)}" style="--sc:${x.c}" aria-pressed="${STY.filter === x.n}">${esc(x.n)}<b>${c}</b></button>`; }).join('')
     + (id === 'dl-sbar' ? `<button class="chip" data-chipadd="1" style="--sc:#888">＋ Bac</button>` : ''); }
 function setStyle(list, n){ list.forEach(t => { t.style = n || null; t.styleSrc = 'main'; saveTrack(t); }); }   // choisi à la main : jamais touché par les scans
@@ -3877,9 +3881,11 @@ function openQPick(id){
 function renderQPick(){
   const d = qpDeck;
   renderSbar('qp-sbar');
-  $('qp-list').innerHTML = lib.map((t, i) => { const k = qpSel.indexOf(t); if (!inFilter(t)) return '';
+  // favoris en tête (dans « Tous » comme dans chaque bac), sinon ordre de la bibliothèque
+  const order = lib.map((t, i) => i).sort((a, b) => (lib[b].fav ? 1 : 0) - (lib[a].fav ? 1 : 0) || a - b);
+  $('qp-list').innerHTML = order.map(i => { const t = lib[i], k = qpSel.indexOf(t); if (!inFilter(t)) return '';
     return `<li data-qp="${i}" role="checkbox" aria-checked="${k >= 0}" class="${d.queue.includes(t) || d.item === t ? 'inq' : ''}">
-      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n">${styDot(t)}${esc(t.name)}${isChecked(t) ? ' <span class="ok">✓</span>' : ''}${doubtTxt(t)}</span>${styBadge(t, i)}<span class="m">${bpmTxt(t)}</span><button class="qe" data-qe="${i}" aria-label="Vérifier ce son dans l'éditeur">✎ Vérifier</button></li>`; }).join('')
+      <span class="ck">${k >= 0 ? k + 1 : ''}</span><span class="n"><button class="fav${t.fav ? ' on' : ''}" data-fav="${i}" aria-label="Favori" aria-pressed="${!!t.fav}">${t.fav ? '★' : '☆'}</button>${styDot(t)}${esc(t.name)}${isChecked(t) ? ' <span class="ok">✓</span>' : ''}${doubtTxt(t)}</span>${styBadge(t, i)}<span class="m">${bpmTxt(t)}</span><button class="qe" data-qe="${i}" aria-label="Vérifier ce son dans l'éditeur">✎ Vérifier</button></li>`; }).join('')
     + '<li class="dnote">Touche les sons dans l\'ordre où tu veux les jouer (le numéro = l\'ordre), puis « Ajouter ». Badge de style : touche-le pour changer le bac ; sur un son coché, ça range TOUS les sons cochés d\'un coup. « Du téléphone » importe de nouveaux fichiers : sur le téléphone, appuie longuement sur un fichier pour en cocher plusieurs.<br>✎ Vérifier : ouvre le son dans l\'éditeur pour contrôler K, B1, B2, C, F avant le mix. « Vérifier » en haut : passe un à un les sons cochés (ou, sans coche, ceux de la file pas encore vérifiés). ✓ = son vérifié.</li>';
   const n = qpSel.length, ok = $('qp-ok');
   ok.disabled = !n; ok.textContent = n ? `Ajouter (${n})` : 'Ajouter';
@@ -3888,6 +3894,8 @@ function renderQPick(){
 }
 $('qp-list').addEventListener('click', e => {
   if (e.target.closest('[data-sty]')) return;   // le badge de style ouvre le choix du bac (pas de coche)
+  const fv = e.target.closest('[data-fav]');
+  if (fv){ const t = lib[+fv.dataset.fav]; t.fav = !t.fav; saveTrack(t); renderQPick(); toast(t.fav ? '★ Ajouté aux favoris (il reste dans son bac).' : 'Retiré des favoris.', 1500); return; }
   const qe = e.target.closest('[data-qe]'); if (qe){ e.stopPropagation(); checkItem(lib[+qe.dataset.qe], []); return; }
   const li = e.target.closest('li[data-qp]'); if (!li) return;
   const t = lib[+li.dataset.qp], k = qpSel.indexOf(t);
@@ -4709,7 +4717,7 @@ applySkin(savedSkin);
     }
     for (const a in alias){ let b = alias[a]; while (alias[b]) b = alias[b]; alias[a] = b; }
     const kept = new Set([...keep.values()].map(r => r.id));
-    saved = recs.filter(r => kept.has(r.id)).map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null, style: r.style || null, styleSrc: r.styleSrc || null, genreTried: !!r.genreTried, ana: r.ana || null}));
+    saved = recs.filter(r => kept.has(r.id)).map(r => ({id: r.id, name: r.name, file: r.blob, buffer: null, bpm: 0, markers: r.markers || null, style: r.style || null, styleSrc: r.styleSrc || null, fav: !!r.fav, genreTried: !!r.genreTried, ana: r.ana || null}));
     saved.alias = alias;
   } catch(e){}
   const specs = [

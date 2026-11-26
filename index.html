@@ -461,6 +461,9 @@ html,body{background:radial-gradient(ellipse at 50% 45%,#0a2a30 0,#04090b 55%,#0
 /* ---------- Skins (thèmes) ---------- */
 .visbtn{right:auto!important;left:6px}
 .skinbtn.fsbtn{right:172px;padding:0;width:46px;justify-content:center}
+.profrows{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:6px 14px}
+.profrow{display:flex;align-items:center;gap:8px;min-height:40px}.profrow b{flex:0 0 110px;font-weight:600}
+.profrow select{flex:1;min-width:0;height:38px;border-radius:7px;border:1px solid rgba(32,230,232,.4);background:#05080a;color:#dffcff;font:inherit;padding:0 8px}
 .skinbtn.recbtn{right:auto;left:150px;gap:9px;min-width:96px;justify-content:center;font-variant-numeric:tabular-nums}
 .recdot{width:13px;height:13px;border-radius:50%;background:#ff2d55;box-shadow:0 0 6px #ff2d55;display:inline-block;flex:none}
 .recbtn[aria-pressed="true"]{border-color:#ff2d55!important;color:#ff6b84!important;background:#2a0710!important}
@@ -1096,7 +1099,12 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 142</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 143</p>
+        </div>
+        <div class="sgroup">
+          <h3>Façon de mixer par style</h3>
+          <p class="snote">Chaque style a sa façon de mixer, réglée comme les meilleurs DJ du genre. « Auto » = le réglage conseillé. Pour un mix entre deux styles différents, c'est le style du son qui entre qui décide (rap d'un côté → cut ; hard d'un côté → hard ; tempos trop éloignés → rewind).</p>
+          <div id="profrows" class="profrows"></div>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -2652,8 +2660,29 @@ function endOfMusic(t){
 // - P = 1er temps d'une phrase de 32 temps de A, là où sa ligne de basse se termine
 // - B est lancé sur sa 1re frappe, exactement autant de temps avant P que dure son intro,
 //   pour que sa 1re basse tombe pile sur P (le « 1 » de la phrase)
+// ===== PROFILS DE MIX PAR STYLE =====
+// hard  : hardstyle / rawstyle / hardcore / uptempo / speedcore — B1 sur B2, relais des basses, coupures, tricks (le réglage WARTEK)
+// blend : house / techno / électro / tribe — long mélange intro sur outro, relais des basses sur la phrase, sortie au filtre,
+//         jamais de coupure sèche ni de trick (le groove continue)
+// dnb   : drum & bass — double drop (drop sur drop), relais des basses, sortie en écho ; pas de trick « A seul »
+// dub   : dubstep — drop sur drop, intro courte (16 temps max), coupure sur le break, roll avant le drop
+// cut   : rap / hip-hop — pas de mélange (les voix se marchent dessus) : A part en écho sur la fin de sa phrase,
+//         B entre pile sur le 1er temps (« cut »)
+const PROFILS = {
+  hard:  {n: 'Hard (B1 sur B2)',          tricks: true,  roll: true,  breakCut: true,  closedIntro: true,  echoOut: 0.7},
+  blend: {n: 'Long mix (house, techno)',  tricks: false, roll: false, breakCut: false, closedIntro: false, echoOut: 0,   longFade: true},
+  dnb:   {n: 'Drum & bass (double drop)', tricks: false, roll: true,  breakCut: true,  closedIntro: true,  echoOut: 0.9},
+  dub:   {n: 'Dubstep (drop sur drop)',   tricks: false, roll: true,  breakCut: true,  closedIntro: true,  echoOut: 0.8, maxIntro: 16},
+  cut:   {n: 'Cut (rap, hip-hop)',        tricks: false, roll: false, breakCut: false, closedIntro: false, echoOut: 1,   cutMix: true}
+};
+const PROF_DEF = {Hardstyle: 'hard', Rawstyle: 'hard', Hardcore: 'hard', Uptempo: 'hard', Speedcore: 'hard', Tribe: 'blend', 'Électro': 'blend', House: 'blend', Dubstep: 'dub', 'Drum & Bass': 'dnb', Rap: 'cut'};
+const profUser = () => { try { return JSON.parse(localStorage.getItem('wm-prof') || '{}') || {}; } catch(e){ return {}; } };
+function profOf(t){ const st = t && styleOf(t), u = profUser(); if (!st) return 'hard'; return PROFILS[u[st.n]] ? u[st.n] : (PROF_DEF[st.n] || 'hard'); }
+// profil d'une transition : celui du son qui entre ; si l'un des deux est du rap → cut ; un long mix vers du hard reste en hard
+function mixProfile(a, b){ const pa = profOf(a), pb = profOf(b); if (pa === 'cut' || pb === 'cut') return 'cut'; if (pa === 'hard' || pb === 'hard') return 'hard'; return pb; }
 function makePlan(o, n){
   if (!o.buffer || !n.buffer || !o.bpm || !n.bpm) return null;
+  const prof = mixProfile(o.item, n.item), PF = PROFILS[prof];
   const so = {...structureOf(o.item)}, sn = {...structureOf(n.item)};
   // B2 (sortant) et B1 (entrant) lus au kick près, même méthode des deux côtés : B1 tombe pile sur B2
   // 1) attaque du kick (clic aigu) des deux côtés : la plus juste ; 2) sinon l'ancien calage au pic d'énergie
@@ -2711,6 +2740,16 @@ function makePlan(o, n){
     if (aStart > E - 4 * ob) aStart = grid(pos + lead, 4 * ob, true);
     I = bgFor(Math.max(0, Math.floor((limit - aStart) / ob)));
   }
+  if (PF.maxIntro && useB2 && I > PF.maxIntro && so.lastBass - PF.maxIntro * ob >= pos + lead){
+    // dubstep : intro du son qui entre raccourcie (16 temps), drop sur drop
+    I = PF.maxIntro; aStart = so.lastBass - I * ob; why = `Dubstep : ${n.id} lancé ${I} temps avant son drop, drop sur le drop de ${o.id}`; }
+  if (PF.cutMix && synced){
+    // CUT (rap) : A joue jusqu'à la fin de sa phrase (C posé à la main, sinon fin de sa partie principale), calée sur 16 temps ;
+    // B entre PILE sur ce temps, sur son 1er kick, à fond. Pas de longue superposition.
+    let cA = cutMarkOf(o.item); if (cA == null || cA > limit) cA = grid(limit, 16 * ob, false);
+    if (cA < pos + lead) cA = grid(pos + lead, 16 * ob, true); if (cA > E - 2 * ob) cA = grid(pos + lead, 4 * ob, true);
+    aStart = cA; I = 0; useB2 = false; why = `Cut (${styleOf(n.item) ? styleOf(n.item).n : 'rap'}) : ${n.id} entre sur le 1er temps à la fin de la phrase de ${o.id}`;
+  }
   if (!synced){
     // Tempos trop éloignés pour caler : pas de K2 inventé. B part sur SON K1 au moment où A coupe (son C),
     // A s'éteint en 4 temps. Enchaînement propre au lieu d'un faux calage.
@@ -2727,7 +2766,7 @@ function makePlan(o, n){
     why = `Changement de style (${Math.round(o.bpm * o.rate)} → ${Math.round(n.bpm)} BPM) : rewind de ${o.id}, ${n.id} lancé ${rl} temps avant son B1`; }
   const P = aStart + I * ob;
   // B part sur son 1er kick (kick dès le début) ou I temps avant sa basse : son swap tombe pile sur P
-  const bStart = (introB === 0 || !synced) ? nStart : sn.drop - I * nb;
+  const bStart = (introB === 0 || !synced || (PF.cutMix && I === 0)) ? nStart : sn.drop - I * nb;
   const eB = barEnergy(n.item), dBar = Math.max(0, Math.round((bStart + I * nb - n.firstBeat) / (4 * nb)));
   const refE = eB.slice(dBar, dBar + 4).reduce((a, b) => a + b, 0) / Math.max(1, Math.min(4, eB.length - dBar));
   // Point de coupe C du son sortant (en mesures après le swap) :
@@ -2740,9 +2779,9 @@ function makePlan(o, n){
   { const ct = autoCutTime(P, ob, so.outro, o.item); cutBars = Math.max(1, Math.min((ct - P) / (4 * ob), roomBars)); }
   { const mc = o.item.markers && o.item.markers.cut; if (mc != null){ const cb = (mc - P) / (4 * ob); if (cb >= 0.25){ cutBars = Math.min(cb, roomBars); cutBar = null; } } }   // C posé à la main : à l'endroit exact   // C posé dans l'éditeur
   // De C à F : A s'atténue par paliers de 16 temps (tailBars). F = fin de la basse de A (ou fin du morceau).
-  if (!synced){ cutBars = 0.25; }
+  if (!synced || (PF.cutMix && I === 0)){ cutBars = 0.25; }
   const fT = Math.min(so.outro != null && so.outro > P ? so.outro : E, E);
-  const tailBars = !synced ? 0 : Math.max(0, Math.min((fT - (P + cutBars * 4 * ob)) / (4 * ob), roomBars - cutBars));
+  const tailBars = (!synced || (PF.cutMix && I === 0)) ? 0 : Math.max(0, Math.min((fT - (P + cutBars * 4 * ob)) / (4 * ob), roomBars - cutBars));
   // Si le son qui entre part dans un VRAI long break (la montée : au moins 4 mesures = 16 temps sans basse)
   // avant la fin de A : A est coupé NET au début de ce break. Les petites coupures (1 à 3 mesures) sont ignorées.
   { const lim = cutBars + tailBars, LONG = 4;
@@ -2809,6 +2848,8 @@ function makePlan(o, n){
     const qB = fillStart(n.item, sn.drop + k * 32 * nb, nb), qA = fillStart(o.item, P + k * 32 * ob, ob), q = qB ?? qA;
     if (q != null && end > swapBeats + 4) trick.push({q: q + k * 32, end, from: qB != null ? n.id : o.id});
   }
+  if (!PF.breakCut) cutBar = null;   // long mix : pas de coupure sèche sur le break du son qui entre, A s'efface au filtre
+  if (!PF.tricks) trick.length = 0;
   // Volume adapté : le son qui entre est mis au MÊME niveau que celui qui sort (comparé sur B2 de A et B1 de B), ±3 dB au plus
   let match = 1, matchTxt = '';
   if (synced && I > 0 && !swapBeats){ const la = fullLevel(o.item, P, P + 16 * ob), lb = fullLevel(n.item, bDropT, bDropT + 16 * nb);
@@ -2827,7 +2868,7 @@ function makePlan(o, n){
       eq = {bLo: r1(clamp((ra.lo - rb.lo) * 0.7, -4, 4)), bMid: r1(clamp((ra.mid - rb.mid) * 0.7, -4, 4)), bHi: r1(clamp((ra.hi - rb.hi) * 0.7, -4, 4)),
             aMid: r1(clamp(-2 - (A.mid - B.mid) * 0.6, -8, 0)), aHi: r1(clamp(-2 - (A.hi - B.hi) * 0.6, -8, 0))};
       eq.txt = `${n.id} : graves ${eq.bLo >= 0 ? '+' : ''}${eq.bLo}, médiums ${eq.bMid >= 0 ? '+' : ''}${eq.bMid}, aigus ${eq.bHi >= 0 ? '+' : ''}${eq.bHi} dB · ${o.id} pendant B1/B2 : médiums ${eq.aMid}, aigus ${eq.aHi} dB`; } }
-  return {breakFine, weakLo, rewind, eq, keepLo, match, matchTxt, swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
+  return {prof, profTxt: PF.n, cutMix: !!(PF.cutMix && I === 0 && synced), breakFine, weakLo, rewind, eq, keepLo, match, matchTxt, swapBeats, weakTxt, snap, o, n, rate: r, synced, useB2, why, cutBars, tailBars, cut: P + cutBars * 4 * ob, Lp: I, P, oldStart: aStart, trigger: Math.min(aStart, P - 8 * ob), bStart, postBars, cutBar,
           totalBeats: I + stopBars * 4 + 8, trick, style: STYLES[mixCount % STYLES.length], scheduled: false};
 }
 const planStartReal = p => p.scheduled ? p.T0 : ctx.currentTime + (p.oldStart - p.o.pos()) / p.o.rate;
@@ -2952,7 +2993,7 @@ function startTransition(dt){
   const dyn = pos => 0.3 + 0.7 * Math.pow(aLvl(pos), 1.3);   // 1 = A plein ; ~0.3 = A presque silencieux
   // Longue intro (plus de 32 temps avant B1) : B tourne calé mais fader FERMÉ, puis le fader monte temps par temps
   // seulement sur les 32 derniers temps → l'intro de B « envoie » vers le drop au lieu de traîner faiblement en fond.
-  const R0 = L > 32 ? L - 32 : 0, RL = L - R0;
+  const R0 = (PROFILS[plan.prof] || PROFILS.hard).closedIntro && L > 32 ? L - 32 : 0, RL = L - R0;   // long mix : l'intro entre doucement dès le début
   { const d0 = dyn(plan.oldStart), v0 = R0 ? 0 : Math.round(42 * d0); paramAt(n, 'vol', v0, now, 0.01); n.ctl.vol.set(v0, false);
     plan.entree = R0 ? `${n.id} lancé fader fermé (intro de ${Math.round(L)} temps), fader monté temps par temps sur les 32 derniers temps avant B1`
       : `départ de ${n.id} à ${v0} % (niveau de ${o.id} : ${Math.round(aLvl(plan.oldStart) * 100)} %)`; }
@@ -3037,7 +3078,15 @@ function startTransition(dt){
       schedule(o, 'vol', 45, tBreak + 0.5 * beat, 0.1); schedule(o, 'vol', 15, tBreak + beat, 0.12); schedule(o, 'vol', 0, tBreak + 2 * beat, 0.15);
       plan.tFade = tBreak; plan.tEnd = tBreak + 3 * beat + 0.3;
       plan.sortie = `Coupure de ${n.id} : ${o.id} coupé net sur le temps (écho court 2 temps), ${Math.round((tBreak - tDrop) / beat)} temps après le swap${plan.breakFine ? ' · ' + plan.breakFine : ''}`; }
-    else if (plan.synced && Math.random() < 0.7){
+    else if (plan.cutMix){
+      // CUT (rap) : le dernier demi-temps de A part en écho (calé au 1/2 temps) et A se tait PILE quand B entre, à fond
+      schedule(o, 'fx', {name: 'echo', amt: 0.6, rate: 0.5, fb: 0.45}, tDrop - 0.5 * beat, 0.02);
+      schedule(o, 'input', 0, tDrop, 0.006); schedule(n, 'vol', 100, tDrop, 0.005);
+      for (let i = 1; i <= 4; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / 4, 1.3)), tDrop + i * beat, 0.15);
+      plan.tFade = tDrop; plan.tEnd = tDrop + 5 * beat + 0.3;
+      plan.sortie = `Cut : ${o.id} part en écho sur la fin de sa phrase, ${n.id} entre pile sur le 1er temps`;
+    }
+    else if (plan.synced && Math.random() < ((PROFILS[plan.prof] || PROFILS.hard).echoOut ?? 0.7)){
       // Sortie en écho : le son se tait sur le temps et son dernier coup part en écho calé (3/4 de temps) qui s'éteint tout seul
       plan.echoOut = true;
       schedule(o, 'fx', {name: 'echo', amt: 0.75, rate: 0.75, fb: 0.55}, tF - 0.5 * beat, 0.02);
@@ -3069,7 +3118,7 @@ function startTransition(dt){
     txt.push(`fin des ${tk.end} : ${o.id} seul ${tk.end - tk.q} temps + ${tk.fx.name} (coupure vue sur ${tk.from})`);
   }
   // Roll avant le drop : sur le dernier temps avant le swap, le son qui sort répète sa dernière croche (6 mix sur 10)
-  if (plan.synced && plan.useB2 && Math.random() < 0.6){
+  if (plan.synced && plan.useB2 && (PROFILS[plan.prof] || PROFILS.hard).roll && Math.random() < 0.6){
     const div = pick([0.25, 0.5]);
     schedule(o, 'fx', {name: 'roll', amt: 1, div}, tDrop - beat, 0.01); schedule(o, 'fx', {name: 'none'}, tDrop, 0.005);
     txt.push(`roll 1/${Math.round(1 / div)} temps avant le drop`);
@@ -3095,7 +3144,7 @@ function diagTrack(d){ const t = d.item; if (!t) return null; const st = t.struc
     basse_autour_B1: around(st.dropBar), basse_autour_B2: around(st.lastBar), marqueurs: t.markers || {}, analyse_48_mesures: t._dbgBars || null, verrou_kicks: t.lockInfo || null, tempo_peigne: t.combInfo || null, nettete_tempo: t.combConf != null ? +t.combConf.toFixed(2) : null, grille_a_verifier: t.gridWarn || null, bpm_a_verifier: t.bpmWarn || null, confiance: t.conf || null, doutes: t.doubt || [], apprentissage: {corrections: LEARN.n, reglage: +LEARN.k.toFixed(2)}, niveau: t.lvlInfo ? {crete_db: +t.lvlInfo.peakDb.toFixed(1), fort_db: +t.lvlInfo.loudDb.toFixed(1), trim_db: +(20 * Math.log10(t.gainTrim)).toFixed(1)} : null, derive_grille_ms: (() => { const ks = t.fitInfo && t.fitInfo.kicks, T = 60 / t.bpm, D = t.buffer ? t.buffer.duration : 0; if (!ks || !D) return null; return [0.1, 0.3, 0.5, 0.7, 0.9].map(f => { const a = D * f - 8, b = D * f + 8, v = ks.filter(x => x > a && x < b).map(x => { const w = (x - t.firstBeat) / T; return (w - Math.round(w)) * T * 1000; }).sort((p, q) => p - q); return v.length ? Math.round(v[Math.floor(v.length / 2)]) : null; }).join(' / '); })(), tempo_corrige: t.tempoFixed || null}; }
 function diagPlan(p){
   DIAG.push({quand: new Date().toLocaleTimeString(), sort: diagTrack(p.o), entre: diagTrack(p.n), vitesse: +p.rate.toFixed(5), K_B1_temps: p.Lp, K2_s: +p.oldStart.toFixed(3), B1_sur_B2: p.useB2, raison: p.why || '',
-    grille_locale: p.local || null, calage_basses_ms: p.snap || null, calage_fin_touches: p.fineLog || [], oreille_ms: p.earLog || [], oreille_temps: p.earBeat || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', basse_faible: p.weakTxt || null, volume_adapte: p.matchTxt || null, egaliseur: p.eq ? p.eq.txt : null, basse_A_gardee_temps: p.keepLo ? p.keepLo * 4 : 0, depart: p.why || null, trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
+    profil: p.profTxt || null, grille_locale: p.local || null, calage_basses_ms: p.snap || null, calage_fin_touches: p.fineLog || [], oreille_ms: p.earLog || [], oreille_temps: p.earBeat || [], corrections: p.earFix || 0, tempo_oreille_pct: p.rateFix ? +(p.rateFix * 100).toFixed(3) : 0, entree: p.entree || '', basse_faible: p.weakTxt || null, volume_adapte: p.matchTxt || null, egaliseur: p.eq ? p.eq.txt : null, basse_A_gardee_temps: p.keepLo ? p.keepLo * 4 : 0, depart: p.why || null, trick: p.trickTxt || 'aucun', coupe_C_temps_apres_swap: Math.round(p.cutBars * 4 * 100) / 100, sortie: p.sortie || '', latence: {base: ctx.baseLatency, sortie: ctx.outputLatency, lead: LEAD(), sr: ctx.sampleRate}});
   if (DIAG.length > 6) DIAG.shift();
 }
 function finishTransition(){
@@ -4363,7 +4412,7 @@ function updateLcd(){
   const cur = Object.values(decks).find(d => d.playing && d.t0 <= ctx.currentTime);
   if (plan){
     const now = ctx.currentTime, id = `${plan.o.id}→${plan.n.id}`, beat = plan.o.beatLen / plan.o.rate;
-    if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = plan.useB2 ? (plan.why ? `Chargé tard : ${plan.n.id} part ${plan.Lp} temps avant B1 → B1 sur B2` : `K de ${plan.n.id} sur K2 de ${plan.o.id} (${plan.Lp} temps) → B1 sur B2`) : plan.why ? `${plan.why} : départ sur un bloc de 32` : `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; }
+    if (!plan.scheduled || now < plan.T0){ a = `MIX ${id} : ${plan.n.id} DÉMARRE DANS ${fmt(planStartReal(plan) - now)}`; b = plan.useB2 ? (plan.why ? `Chargé tard : ${plan.n.id} part ${plan.Lp} temps avant B1 → B1 sur B2` : `K de ${plan.n.id} sur K2 de ${plan.o.id} (${plan.Lp} temps) → B1 sur B2`) : plan.why ? `${plan.why} : départ sur un bloc de 32` : `Départ sur le temps 1 d'un bloc de 32 · swap ${plan.Lp ? 'après ' + plan.Lp + ' temps' : 'direct'}`; if (plan.prof && plan.prof !== 'hard') b = `${PROFILS[plan.prof].n.toUpperCase()} · ${plan.cutMix || plan.prof === 'dub' ? plan.why : b}`; }
     else if (plan.rewind){ a = now < plan.T0 + 1.6 ? `⟲ REWIND ${plan.o.id}` : `${plan.n.id} DROP · B1 DANS ${Math.max(0, Math.ceil((plan.tDrop - now) / (plan.n.beatLen / plan.n.rate)))} T`; b = plan.why; }
     else if (now < plan.tDrop){ a = `${plan.n.id} ENTRE · SWAP DANS ${Math.ceil((plan.tDrop - now) / beat)} T`; b = `${plan.cfx || 'CFX'} · basses ${plan.n.id} coupées`; }
     else if (now < plan.tDrop + 4 * beat){ a = `BASS SWAP → ${plan.n.id}`; b = `Basses ${plan.o.id} coupées net`; }
@@ -4842,6 +4891,14 @@ if ($('appver').textContent.includes('__' + 'VER__')) $('appver').textContent = 
 { const b = $('keepstyle'), get = () => { try { return localStorage.getItem('wm-keepstyle') === '1'; } catch(e){ return false; } };
   const show = () => { const on = get(); b.setAttribute('aria-pressed', String(on)); b.textContent = `Rester dans le style : ${on ? 'oui' : 'non'}`; }; show();
   b.addEventListener('click', () => { try { localStorage.setItem('wm-keepstyle', get() ? '0' : '1'); } catch(e){} show(); }); }
+// Réglages : profil de mix par bac (Auto = réglage conseillé)
+{ const draw = () => { const u = profUser();
+    $('profrows').innerHTML = BACS.map(b => { const def = PROF_DEF[b.n] || 'hard', cur = u[b.n] || '';
+      return `<label class="profrow"><span class="sdot" style="background:${b.c}"></span><b>${esc(b.n)}</b><select data-prof="${esc(b.n)}"><option value=""${cur ? '' : ' selected'}>Auto · ${PROFILS[def].n}</option>${Object.entries(PROFILS).map(([k, v]) => `<option value="${k}"${cur === k ? ' selected' : ''}>${v.n}</option>`).join('')}</select></label>`; }).join(''); };
+  $('profrows').addEventListener('change', e => { const sl = e.target.closest('[data-prof]'); if (!sl) return; const u = profUser();
+    if (sl.value) u[sl.dataset.prof] = sl.value; else delete u[sl.dataset.prof]; try { localStorage.setItem('wm-prof', JSON.stringify(u)); } catch(err){}
+    toast(`${sl.dataset.prof} : ${PROFILS[sl.value || PROF_DEF[sl.dataset.prof] || 'hard'].n}`, 1800); });
+  document.querySelectorAll('[data-open="settings"]').forEach(b => b.addEventListener('click', draw)); draw(); }
 // Sons de départ : les sons chargés sur A et B maintenant reviendront à chaque ouverture de l'appli
 { const note = () => { let st = null; try { st = JSON.parse(localStorage.getItem('wm-start') || 'null'); } catch(e){}
     const nm = id => (lib.find(t => t.id === id) || {}).name || '—';

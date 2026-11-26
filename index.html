@@ -105,7 +105,9 @@ button{cursor:pointer}
 .screens{display:contents}.screens .lcd.big{grid-area:scr}.screens .lcd.small{grid-area:ov}
 /* écran plus haut que le téléphone (tablette, PC) : la console s'étire en hauteur ; la place en plus va surtout
    à la forme d'onde défilante et à la file « À suivre », la vue d'ensemble grandit un peu */
-.stage.tall .loadgrid{grid-template-rows:minmax(84px,1fr) minmax(156px,1.7fr) minmax(70px,1.1fr)}
+.stage.tall{grid-template-rows:var(--hb,94px) 1fr}
+.stage.tall .brandbar .logo{transform:scale(var(--lg,1));transform-origin:center}
+.stage.tall .loadgrid{grid-template-rows:minmax(84px,1fr) minmax(156px,1.5fr) minmax(70px,1fr)}
 .lcd{position:relative;background:var(--lcd);border-radius:6px;border:1px solid #000;box-shadow:inset 0 0 0 2px #303338,inset 0 0 24px rgba(0,0,0,.8);min-height:0;min-width:0;overflow:hidden}
 .lcd canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;font-family:var(--font-lcd);font-size:24px;color:var(--lcd-fg);letter-spacing:.06em;text-shadow:0 0 10px rgba(80,170,255,.6);pointer-events:none;padding-bottom:28px}
@@ -1094,7 +1096,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 141</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 142</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -1104,7 +1106,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         <div class="sgroup">
           <h3>Sons de départ</h3>
           <p class="snote" id="start-note">À l'ouverture de l'appli : les deux premiers sons de ta bibliothèque.</p>
-          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="dbtn" id="start-set">Garder les sons des platines A et B</button><button class="dbtn" id="start-clr">Revenir au choix automatique</button></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="dbtn" id="start-set">Garder les sons des platines A et B + À suivre</button><button class="dbtn" id="start-clr">Revenir au choix automatique</button></div>
         </div>
         <div class="sgroup">
           <h3>Mode léger</h3>
@@ -1238,7 +1240,11 @@ const REC = {on: false};
 function fitStage(){
   const r = fitbox.getBoundingClientRect();
   const H = Math.round(Math.min(1100, Math.max(744, 1600 * r.height / r.width)));
+  // Écran plus haut que le téléphone (tablette, PC) : les platines grandissent d'au plus 18 % (au-delà, faders et formes d'onde
+  // deviennent trop longs) ; le reste de la hauteur va au bandeau du haut, où le logo grandit.
+  const PH = Math.min(H - 104, Math.round(640 * 1.18)), HB = H - 10 - PH;
   stage.style.height = H + 'px'; stage.classList.toggle('tall', H > 760);
+  stage.style.setProperty('--hb', HB + 'px'); stage.style.setProperty('--lg', Math.min(1.7, Math.max(1, (HB - 10) / 90)).toFixed(3));
   stage.style.setProperty('--s', Math.min(r.width / 1600, r.height / H).toFixed(4));
   $('rotate').hidden = !(innerHeight > innerWidth && innerWidth < 900) || rotateDismissed;
 }
@@ -4839,10 +4845,12 @@ if ($('appver').textContent.includes('__' + 'VER__')) $('appver').textContent = 
 // Sons de départ : les sons chargés sur A et B maintenant reviendront à chaque ouverture de l'appli
 { const note = () => { let st = null; try { st = JSON.parse(localStorage.getItem('wm-start') || 'null'); } catch(e){}
     const nm = id => (lib.find(t => t.id === id) || {}).name || '—';
-    $('start-note').textContent = st ? `À l'ouverture : A = « ${nm(st.A)} », B = « ${nm(st.B)} ».` : "À l'ouverture de l'appli : les deux premiers sons de ta bibliothèque."; };
+    const nq = st ? (st.qA || []).length + (st.qB || []).length : 0;
+    $('start-note').textContent = st ? `À l'ouverture : A = « ${nm(st.A)} », B = « ${nm(st.B)} »${nq ? ` + ${nq} son${nq > 1 ? 's' : ''} dans « À suivre »` : ''}.` : "À l'ouverture de l'appli : les deux premiers sons de ta bibliothèque."; };
   $('start-set').addEventListener('click', () => { const a = decks.A.item, b = decks.B.item;
     if (!(a && a.id) && !(b && b.id)){ toast('Charge d\'abord tes sons (de ta bibliothèque) sur les platines.'); return; }
-    try { localStorage.setItem('wm-start', JSON.stringify({A: a && a.id, B: b && b.id})); } catch(e){} note(); toast('Sons de départ gardés.', 2500); });
+    const q = d => d.queue.filter(t => t && t.id).map(t => t.id);
+    try { localStorage.setItem('wm-start', JSON.stringify({A: a && a.id, B: b && b.id, qA: q(decks.A), qB: q(decks.B)})); } catch(e){} note(); toast('Sons de départ et « À suivre » gardés.', 2500); });
   $('start-clr').addEventListener('click', () => { try { localStorage.removeItem('wm-start'); } catch(e){} note(); toast('Sons de départ : choix automatique.', 2500); });
   document.querySelectorAll('[data-open="settings"], #setopen').forEach(b => b.addEventListener('click', note)); setTimeout(note, 4000); }
 // Réglages avancés cachés : 5 taps rapides sur la ligne de version font apparaître le rapport de mix (mémorisé sur ce téléphone)
@@ -4911,6 +4919,8 @@ applySkin(savedSkin);
     } catch(e){}
     // Sons de départ choisis dans les Réglages (sinon les deux premiers de la bibliothèque)
     let st = null; try { st = JSON.parse(localStorage.getItem('wm-start') || 'null'); } catch(e){}
+    // sélection gardée : les listes « À suivre » reviennent aussi telles qu'elles étaient au moment où tu l'as gardée
+    if (st && (st.qA || st.qB)) for (const [id, k] of [['A', 'qA'], ['B', 'qB']]){ decks[id].queue = (st[k] || []).map(x => lib.find(t => t.id === x)).filter(Boolean); renderQueue(decks[id]); }
     const ia = st ? lib.findIndex(t => t.id && t.id === st.A) : -1, ib = st ? lib.findIndex(t => t.id && t.id === st.B) : -1;
     if (ia >= 0 || ib >= 0){ if (ia >= 0) loadItem(ia, 'A'); if (ib >= 0) loadItem(ib, 'B'); }
     else if (saved.length){ loadItem(0, 'A'); if (lib[1]) loadItem(1, 'B'); }

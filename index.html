@@ -459,6 +459,13 @@ html,body{background:radial-gradient(ellipse at 50% 45%,#0a2a30 0,#04090b 55%,#0
 /* ---------- Skins (thèmes) ---------- */
 .visbtn{right:auto!important;left:6px}
 .skinbtn.fsbtn{right:172px;padding:0;width:46px;justify-content:center}
+.skinbtn.recbtn{right:auto;left:150px;gap:9px;min-width:96px;justify-content:center;font-variant-numeric:tabular-nums}
+.recdot{width:13px;height:13px;border-radius:50%;background:#ff2d55;box-shadow:0 0 6px #ff2d55;display:inline-block;flex:none}
+.recbtn[aria-pressed="true"]{border-color:#ff2d55!important;color:#ff6b84!important;background:#2a0710!important}
+.recbtn[aria-pressed="true"] .recdot{animation:recblink 1s steps(1) infinite}
+@keyframes recblink{50%{opacity:.15}}
+#rec-list{width:100%;min-height:190px;resize:vertical;border-radius:8px;border:1px solid rgba(32,230,232,.4);background:#05080a;color:#dffcff;font:15px/1.5 ui-monospace,Menlo,Consolas,monospace;padding:10px 12px;box-sizing:border-box}
+#rec-audio{width:100%;margin:6px 0 10px}
 .skinbtn.fsbtn svg{margin:0}
 .skinbtn{position:absolute;right:6px;top:50%;transform:translateY(-50%);height:46px;padding:0 14px;border-radius:6px;border:1px solid rgba(32,230,232,.45);background:#0b1416;color:var(--neon);font-weight:700;font-size:15px;letter-spacing:.12em;text-transform:uppercase;display:flex;align-items:center;gap:8px;z-index:2;touch-action:manipulation}
 .skinbtn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2}
@@ -943,6 +950,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
     </h1>
     <span class="bline r"></span>
     <button class="skinbtn visbtn" id="visopen" aria-label="Plein écran visuel qui bouge avec la musique"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.5" stroke-dasharray="3 2.5"/><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5"/></svg>Visuel</button>
+    <button class="skinbtn recbtn" id="recbtn" aria-pressed="false" aria-label="Enregistrer le mix" title="Enregistrer le mix"><i class="recdot"></i><span id="rectime">REC</span></button>
     <button class="skinbtn fsbtn" id="fsbtn" hidden aria-label="Plein écran (cache les barres du navigateur)" title="Plein écran"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
     <button class="skinbtn" data-open="themes" aria-label="Changer de thème"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><rect x="7" y="6" width="10" height="6"/><circle cx="9" cy="16.5" r="1.3"/><path d="M14 15.5h3M14 18h3"/></svg>Thème</button>
   </header>
@@ -1044,6 +1052,18 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
     </div>
   </div>
 
+  <div class="drawer" id="recdlg" hidden>
+    <div class="dpanel" role="dialog" aria-label="Mix enregistré">
+      <div class="dhead"><h2 id="rec-title">Mix enregistré</h2><button class="dbtn" data-close>Fermer</button></div>
+      <div class="sbody">
+        <audio id="rec-audio" controls preload="metadata"></audio>
+        <div class="serow" style="margin-top:0"><button class="dbtn" id="rec-dl">⬇ Télécharger le mix</button><button class="dbtn" id="rec-share" hidden>Partager</button><span class="snote" id="rec-info" style="margin:0"></span></div>
+        <div class="serow"><b class="selbl">Liste des sons</b><button class="dbtn" id="rec-copy">Copier la liste</button><button class="dbtn" id="rec-txt">⬇ Télécharger la liste (.txt)</button></div>
+        <textarea id="rec-list" spellcheck="false" aria-label="Compte rendu du mix (modifiable)"></textarea>
+        <div class="snote">Le compte rendu est modifiable avant de le copier. Le fichier audio est le son de la sortie master (ce que tu entends, effets et samples compris).</div>
+      </div>
+    </div>
+  </div>
   <div class="drawer" id="sedit" hidden>
     <div class="dpanel" role="dialog" aria-label="Réglage du sample">
       <div class="dhead"><h2 id="se-title">Sample</h2><button class="dbtn" id="se-close" data-close>Fermer</button></div>
@@ -1074,7 +1094,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 140</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 141</p>
         </div>
         <div class="sgroup">
           <h3>Smart Mix et styles</h3>
@@ -1161,6 +1181,53 @@ const RES = 150, ZOOM_SPAN = 8;
 /* ---------- Mise à l'échelle ---------- */
 const stage = $('stage'), fitbox = $('fitbox');
 let rotateDismissed = false;
+// ===== REC : enregistre la sortie master (après limiteur) + compte rendu des sons joués =====
+const REC = {on: false};
+{ const pickType = () => { try { for (const t of ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']) if (MediaRecorder.isTypeSupported(t)) return t; } catch(e){} return ''; };
+  const fmt = sec => { sec = Math.max(0, Math.floor(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, x = sec % 60; return (h ? h + ':' + String(m).padStart(2, '0') : String(m).padStart(2, '0')) + ':' + String(x).padStart(2, '0'); };
+  const el = () => (performance.now() - REC.t0) / 1000;
+  const label = t => { const st = styleOf(t), b = bpmOf(t); return `${t.name}${b ? ` (${Math.round(b)} BPM${st ? ' · ' + st.n : ''})` : ''}`; };
+  // Un son entre dans le compte rendu quand il s'ENTEND vraiment (fader ouvert, niveau présent ~1,5 s) : marche en Smart Mix comme à la main
+  const poll = () => { if (!REC.on) return; const tSec = el();
+    for (const d of Object.values(decks)){ const t = d.item; if (!t || !d.playing) { d._recHear = 0; continue; }
+      let lv = 0; try { d.an.getFloatTimeDomainData(d.anBuf); let ss = 0; for (const v of d.anBuf) ss += v * v; lv = Math.sqrt(ss / d.anBuf.length); } catch(e){}
+      const xf = d.xf && d.xf.gain ? d.xf.gain.value : 1;
+      d._recHear = lv * xf > 0.02 ? (d._recHear || 0) + 1 : 0;
+      if (d._recHear >= 3 && !REC.list.some(e => e.t === t && tSec - e.at < 600) && REC.last[d.id] !== t){
+        REC.last[d.id] = t; REC.list.push({t, at: Math.max(0, tSec - 1.5), deck: d.id, txt: label(t)}); } }
+    $('rectime').textContent = fmt(tSec); };
+  const start = () => {
+    let stream; try { const dst = ctx.createMediaStreamDestination(); limOut.connect(dst); REC.dst = dst; stream = dst.stream; } catch(e){ toast('Enregistrement impossible sur ce navigateur.'); return; }
+    const type = pickType(); let mr; try { mr = new MediaRecorder(stream, type ? {mimeType: type, audioBitsPerSecond: 256000} : {}); } catch(e){ try { mr = new MediaRecorder(stream); } catch(e2){ toast('Enregistrement impossible sur ce navigateur.'); return; } }
+    Object.assign(REC, {on: true, mr, chunks: [], list: [], last: {}, t0: performance.now(), date: new Date(), type: mr.mimeType || type});
+    mr.ondataavailable = e => { if (e.data && e.data.size) REC.chunks.push(e.data); };
+    mr.onstop = finish; mr.start(1000);
+    REC.iv = setInterval(poll, 500); poll();
+    $('recbtn').setAttribute('aria-pressed', 'true'); toast('● REC : le mix est enregistré (sortie master). Appuie encore pour arrêter.', 3000);
+    try { navigator.wakeLock && navigator.wakeLock.request('screen').then(w => REC.wl = w).catch(() => {}); } catch(e){} };
+  const stop = () => { if (!REC.on) return; REC.on = false; REC.dur = el(); clearInterval(REC.iv); try { REC.mr.stop(); } catch(e){ finish(); }
+    $('recbtn').setAttribute('aria-pressed', 'false'); $('rectime').textContent = 'REC'; try { REC.wl && REC.wl.release(); } catch(e){} };
+  function finish(){ try { limOut.disconnect(REC.dst); } catch(e){}
+    const blob = new Blob(REC.chunks, {type: REC.type || 'audio/webm'}), ext = /mp4/.test(blob.type) ? 'm4a' : 'webm';
+    const d = REC.date, stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}h${String(d.getMinutes()).padStart(2, '0')}`;
+    REC.blob = blob; REC.fname = `WARTEK-mix_${stamp}.${ext}`;
+    if (REC.url) URL.revokeObjectURL(REC.url); REC.url = URL.createObjectURL(blob); $('rec-audio').src = REC.url;
+    const dateTxt = d.toLocaleDateString('fr-CH', {weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'}) + ' à ' + d.toLocaleTimeString('fr-CH', {hour: '2-digit', minute: '2-digit'});
+    const lines = [`WARTEK MACHINE — Mix du ${dateTxt}`, `Durée : ${fmt(REC.dur)}`, ''];
+    REC.list.forEach((e, i) => lines.push(`${String(i + 1).padStart(2, ' ')}. ${fmt(e.at)}  ${e.txt}`));
+    if (!REC.list.length) lines.push('(aucun son entendu pendant l\'enregistrement)');
+    $('rec-list').value = lines.join('\n'); $('rec-title').textContent = `Mix enregistré · ${fmt(REC.dur)}`;
+    $('rec-info').textContent = `${(blob.size / 1e6).toFixed(1)} Mo · ${ext.toUpperCase()} · ${REC.list.length} son${REC.list.length > 1 ? 's' : ''}`;
+    $('rec-share').hidden = !(navigator.canShare && navigator.canShare({files: [new File([blob], REC.fname, {type: blob.type})]}));
+    $('recdlg').hidden = false; }
+  const save = (blob, name) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); };
+  $('recbtn').addEventListener('click', () => { if (REC.on) stop(); else { if (ctx.state !== 'running') ctx.resume(); start(); } });
+  $('rec-dl').addEventListener('click', () => REC.blob && save(REC.blob, REC.fname));
+  $('rec-txt').addEventListener('click', () => save(new Blob([$('rec-list').value], {type: 'text/plain;charset=utf-8'}), REC.fname.replace(/\.[a-z0-9]+$/, '.txt')));
+  $('rec-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('rec-list').value); toast('Liste copiée.', 1500); } catch(e){ $('rec-list').select(); document.execCommand('copy'); toast('Liste copiée.', 1500); } });
+  $('rec-share').addEventListener('click', async () => { try { await navigator.share({files: [new File([REC.blob], REC.fname, {type: REC.blob.type})], title: 'Mix WARTEK', text: $('rec-list').value}); } catch(e){} });
+  addEventListener('beforeunload', e => { if (REC.on){ e.preventDefault(); e.returnValue = ''; } });
+}
 // Plein écran (PC, tablette dans le navigateur) : cache les barres du navigateur. Inutile quand l'appli est installée.
 { const b = $('fsbtn'), d = document.documentElement, inApp = () => matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
   const req = d.requestFullscreen || d.webkitRequestFullscreen, exit = document.exitFullscreen || document.webkitExitFullscreen;

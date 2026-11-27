@@ -1099,7 +1099,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 147</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 148</p>
         </div>
         <div class="sgroup">
           <h3>Façon de mixer par style</h3>
@@ -3000,6 +3000,42 @@ function rapCut(t, lo, hi, ob){
     if (m < bestV){ bestV = m; best = k; } }
   return best != null ? {t: fb + best * T, free: false, v: bestV} : null;
 }
+// ===== SCRATCH « vrai DJ » =====
+// On simule le disque tenu à la main : à chaque instant on sait OÙ est le diamant sur le son (avance / recule, vitesse qui
+// varie comme un geste de main), et le crossfader coupe le son selon la technique. Le son est rejoué à la position exacte
+// (lecture avant ET arrière, hauteur qui suit la vitesse) → baby, chirp, transformer, tear, flare, puis release.
+// « cue » = le point de scratch : l'attaque la plus franche (kick / caisse claire / syllabe) de la dernière mesure.
+function scratchCue(buf, p0, p1){
+  try { const sr = buf.sampleRate, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L, H = Math.round(sr / 400);
+    let e = 0, prev = 0, best = -1, bt = p0; const a = Math.floor(p0 * sr), z = Math.min(buf.length - 1, Math.floor(p1 * sr));
+    for (let i = a; i < z; i += H){ let s2 = 0; for (let k = 0; k < H; k++) s2 += Math.abs(L[i + k] + R[i + k]); e = s2 / H; const d = e - prev * 1.15; if (d > best && i > a + H){ best = d; bt = i / sr; } prev = e; }
+    return Math.max(0, bt - 0.006); } catch(e){ return p0; }
+}
+function renderScratch(buf, cue, beat, gainLin){
+  const sr = buf.sampleRate, D = 0.17, len = Math.ceil(8.6 * beat * sr), out = ctx.createBuffer(2, len, sr);
+  const R = [];   // [début (temps), durée (temps), de, à, crossfader]
+  for (let k = 0; k < 4; k++) R.push([k * 0.5, 0.25, 0, 1, 'o'], [k * 0.5 + 0.25, 0.25, 1, 0, 'o']);            // baby (croches)
+  for (let k = 0; k < 2; k++) R.push([2 + k * 0.5, 0.25, 0, 1, 'chirp'], [2 + k * 0.5 + 0.25, 0.25, 1, 0, 'x']); // chirps
+  R.push([3, 0.5, 0, 1, 'trans'], [3.5, 0.5, 1, 0, 'trans']);                                                      // transformer
+  R.push([4, 0.2, 0, 0.5, 'o'], [4.25, 0.2, 0.5, 1, 'o'], [4.5, 0.5, 1, 0, 'o']);                                  // tear
+  R.push([5, 0.5, 0, 1, 'flare'], [5.5, 0.5, 1, 0, 'flare']);                                                      // flare (1 clic)
+  for (let k = 0; k < 4; k++) R.push([6 + k * 0.25, 0.125, 0, 0.7, 'o'], [6 + k * 0.25 + 0.125, 0.125, 0.7, 0, 'o']); // baby rapide
+  R.push([7, 1.5, 0, 3, 'rel']);                                                                                   // release : on lâche le disque
+  const ch = [buf.getChannelData(0), buf.numberOfChannels > 1 ? buf.getChannelData(1) : buf.getChannelData(0)], O = [out.getChannelData(0), out.getChannelData(1)];
+  let gs = 0; const aS = 1 - Math.exp(-1 / (0.0025 * sr));
+  for (const [b0, du, fr, to, fx] of R){
+    const i0 = Math.floor(b0 * beat * sr), n = Math.floor(du * beat * sr);
+    for (let j = 0; j < n && i0 + j < len; j++){
+      const u = j / n, ease = fx === 'rel' ? u * (0.5 + 0.5 * u) : (1 - Math.cos(Math.PI * u)) / 2, pos = (cue + D * (fr + (to - fr) * ease)) * sr;
+      const tb = b0 + du * u; let g = 1;
+      if (fx === 'x') g = 0; else if (fx === 'chirp') g = u < 0.7 ? 1 : 0; else if (fx === 'trans') g = Math.floor(tb * 8) % 2 ? 0 : 1;
+      else if (fx === 'flare') g = Math.abs(u - 0.5) < 0.08 ? 0 : 1; else if (fx === 'rel') g = 1 - u;
+      gs += (g - gs) * aS; const k = Math.floor(pos), f = pos - k;
+      for (let c = 0; c < 2; c++){ const a = ch[c][k] || 0, bb = ch[c][k + 1] || 0; O[c][i0 + j] += (a + (bb - a) * f) * gs * gainLin; }
+    }
+  }
+  return out;
+}
 // ===== Techniques d'enchaînement RAP / HIP-HOP =====
 const RAPFX = {rewind: 'Rewind', brake: 'Frein vinyle', echo: 'Écho + drop', scratch: 'Scratch', filter: 'Filtre + coupe', sample: 'Sample impact', passe: 'Passe-passe'};
 let RAPFX_HIST = [];
@@ -3017,7 +3053,7 @@ function startRapFx(dt){
     if (p0 > 0.05){ const ls = ctx.createBufferSource(), lg = ctx.createGain(); ls.buffer = o.buffer; ls.loop = true; ls.loopStart = p0; ls.loopEnd = p1; ls.playbackRate.value = o.rate;
       lg.gain.setValueAtTime(0, T0 - 0.004); lg.gain.linearRampToValueAtTime(1, T0 + 0.004); ls.connect(lg); lg.connect(o.trimG); ls.start(T0 - 0.004, p0 - 0.004 * o.rate); loop = {ls, lg};
       o.input.gain.cancelScheduledValues(0); o.input.gain.setValueAtTime(o.input.gain.value, now); o.input.gain.setValueAtTime(1, T0 - 0.004); o.input.gain.linearRampToValueAtTime(0, T0 + 0.004); } } catch(e){ loop = null; } }
-  const cutA = t => { if (loop){ loop.lg.gain.setValueAtTime(1, t - 0.012); loop.lg.gain.linearRampToValueAtTime(0, t); loop.ls.stop(t + 0.05); return; }
+  const cutA = t => { if (loop){ const fz = Math.max(0.05, beat / 3); loop.lg.gain.setValueAtTime(1, t - fz); loop.lg.gain.linearRampToValueAtTime(0, t); loop.ls.stop(t + 0.05); return; }
     o.input.gain.cancelScheduledValues(0); o.input.gain.setValueAtTime(o.input.gain.value, now); o.input.gain.setValueAtTime(0, t); };
   // un bout de A (à l'endroit ou à l'envers) rejoué par-dessus : sert au scratch
   const chunk = (from, len, t, r0, r1, back) => { try { const b = o.buffer, sr = b.sampleRate, i0 = Math.max(0, Math.floor(from * sr)), L = Math.max(64, Math.floor(len * sr));
@@ -3032,9 +3068,11 @@ function startRapFx(dt){
   // v146 : transitions plus longues et FONDUES — A s'efface pendant que B monte (fondu + filtre qui s'ouvre), plus de coupure brusque
   let tB = T0, fadeIn = 2 * beat, extra = '';
   const fadeA = (t, d) => { for (let i = 1; i <= 8; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / 8, 1.4)), t + d * i / 8, 0.1); };
+  // queue d'écho sur la fin de A (CFX qui s'éclaircit en même temps) : la sortie se fond au lieu de s'arrêter net
+  const tailA = t => { schedule(o, 'fx', {name: 'echo', amt: 0.55, rate: 0.75, fb: 0.5}, t - beat, 0.08); schedule(o, 'filt', 18, t - beat, 0.3); };
   if (fx === 'brake'){   // frein de platine sur 3 temps (A s'assombrit en ralentissant) ; B monte en fondu pendant la fin du frein
     const D = 3 * beat, sA = loop ? loop.ls : o.src; if (sA){ sA.playbackRate.cancelScheduledValues(0); sA.playbackRate.setValueAtTime(sA.playbackRate.value, T0); sA.playbackRate.setTargetAtTime(0.02, T0, D / 3); }
-    schedule(o, 'filt', -24, T0 + D * 0.5, 0.4); fadeA(T0 + beat, D - beat); cutA(T0 + D + 0.05); tB = T0 + 2 * beat; fadeIn = 2 * beat;
+    schedule(o, 'filt', -24, T0 + D * 0.5, 0.4); fadeA(T0 + beat, D - beat); tailA(T0 + D); cutA(T0 + D + 0.05); tB = T0 + 2 * beat; fadeIn = 2 * beat;
   } else if (fx === 'echo'){   // écho long : A part en écho et s'efface sur 4 temps, B monte en fondu sur 4 temps
     schedule(o, 'fx', {name: 'echo', amt: 0.7, rate: 0.75, fb: 0.6}, T0 - beat, 0.05); fadeA(T0, 4 * beat); cutA(T0 + 4 * beat); tB = T0 + beat; fadeIn = 4 * beat;
   } else if (fx === 'filter'){  // A monte au filtre sur 8 temps en s'effaçant ; B entre à mi-chemin, filtré, et s'ouvre
@@ -3043,15 +3081,20 @@ function startRapFx(dt){
   } else if (fx === 'sample'){  // A part en écho sur 4 temps, l'impact claque quand B arrive (en fondu court)
     schedule(o, 'fx', {name: 'echo', amt: 0.6, rate: 0.5, fb: 0.5}, T0 - 0.5 * beat, 0.05); fadeA(T0, 4 * beat); cutA(T0 + 4 * beat);
     tB = T0 + 2 * beat; fadeIn = beat; extra = samp(/impact|kick|boom|crash/i, tB, 0.8);
-  } else if (fx === 'scratch'){ // 8 allers-retours sur 4 temps pendant que A s'efface ; B monte sur les 2 derniers temps
-    const p0 = Math.max(0.3, plan.oldStart - 0.5 * beat * o.rate), len = 0.22 * beat * o.rate;
-    fadeA(T0, 2 * beat); cutA(T0 + 2 * beat);
-    for (let k = 0; k < 8; k++){ const t = T0 + k * 0.5 * beat; chunk(p0, len, t, 0.6, 1.5, false); chunk(p0, len, t + 0.25 * beat, 1.5, 0.6, true); }
-    tB = T0 + 2 * beat; fadeIn = 2 * beat;
+  } else if (fx === 'scratch'){ // vrai scratch sur 2 mesures par-dessus la boucle de A, puis par-dessus B qui arrive
+    try { const p1 = plan.oldStart, cue = scratchCue(o.buffer, Math.max(0, p1 - 4 * o.beatLen), p1);
+      const sb = renderScratch(o.buffer, cue, beat, (o.item.gainTrim ?? 1) * (o.item.mixTrim ?? 1));
+      const ss = ctx.createBufferSource(), sg = ctx.createGain(), dl = ctx.createDelay(2), fbk = ctx.createGain(), send = ctx.createGain();
+      ss.buffer = sb; sg.gain.value = 0.9; ss.connect(sg); sg.connect(masterBus);
+      dl.delayTime.value = 0.75 * beat; fbk.gain.value = 0.42; send.gain.setValueAtTime(0, T0); send.gain.setValueAtTime(0.55, T0 + 7 * beat);   // écho sur le « release »
+      sg.connect(send); send.connect(dl); dl.connect(fbk); fbk.connect(dl); dl.connect(masterBus); ss.start(T0); ss.stop(T0 + 8.7 * beat);
+      setTimeout(() => { try { send.disconnect(); dl.disconnect(); fbk.disconnect(); } catch(e){} }, (T0 - ctx.currentTime + 14 * beat) * 1000); } catch(e){}
+    schedule(o, 'vol', 62, T0, 0.2); fadeA(T0 + 4 * beat, 2.5 * beat); tailA(T0 + 6.5 * beat); cutA(T0 + 6.5 * beat);    // la boucle de A reste dessous, plus bas, puis s'efface
+    tB = T0 + 4 * beat; fadeIn = 2 * beat;
   } else if (fx === 'passe'){   // passe-passe sur 2 mesures : d'abord tous les 2 temps, puis à chaque temps, puis B reste
     tB = T0; fadeIn = 0.02;
     const seq = [0, 2, 4, 5, 6, 7]; seq.forEach((b, i) => schedule(null, 'xf', i % 2 ? toO : toN, T0 + b * beat, 0.006));
-    schedule(null, 'xf', toN, T0 + 8 * beat, 0.006); fadeA(T0 + 7 * beat, 2 * beat); cutA(T0 + 9 * beat);
+    schedule(null, 'xf', toN, T0 + 8 * beat, 0.006); fadeA(T0 + 7 * beat, 2 * beat); tailA(T0 + 9 * beat); cutA(T0 + 9 * beat);
   } else return startRewind(dt, true);
   // B : à fond, sur son 1er temps, au niveau de A
   n.setRate(fx === 'passe' ? R.ratio : 1);
@@ -3061,8 +3104,8 @@ function startRapFx(dt){
   n.input.gain.cancelScheduledValues(0); n.input.gain.setValueAtTime(0, tB - 0.006); n.input.gain.linearRampToValueAtTime(1, tB + fadeIn);
   if (fadeIn > 0.1){ schedule(n, 'filt', -30, tB - 0.01, 0.01); for (let i = 1; i <= 4; i++) schedule(n, 'filt', Math.round(-30 * (1 - i / 4)), tB + fadeIn * i / 4, 0.1); }
   n.playAt(tB - 0.006, Math.max(0, R.bStart - 0.006)); n.t0 = tB - 0.006;
-  if (fx !== 'passe') schedule(null, 'xf', 50, tB, 0.02), schedule(null, 'xf', toN, tB + fadeIn, fadeIn / 3);
-  plan.tDrop = tB; plan.tFade = T0; plan.tEnd = Math.max(tB + fadeIn, T0 + (fx === 'passe' ? 9 : fx === 'filter' ? 8 : 4) * beat) + 0.6;
+  if (fx !== 'passe') schedule(null, 'xf', 50, tB - 0.05, 0.03);
+  plan.tDrop = tB; plan.tFade = T0; plan.tEnd = Math.max(tB + fadeIn, T0 + ({passe: 9, filter: 8, scratch: 9}[fx] || 4) * beat) + 2 * beat;   // + 2 temps : l'écho finit de s'éteindre
   plan.sortie = `Rap · ${RAPFX[fx]}${extra ? ' (' + extra + ')' : ''} : ${o.id} ${loop ? (R.voc && R.voc.free ? 'bouclé sur sa dernière mesure sans paroles' : 'bouclé sur sa dernière mesure') : 'sur la fin de sa phrase'}, ${n.id} sur son 1er temps · volume ${n.id} ${(20 * Math.log10(R.match)).toFixed(1)} dB`;
   plan.trickTxt = ''; plan.entree = plan.why;
 }

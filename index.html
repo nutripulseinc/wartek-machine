@@ -1099,7 +1099,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 143</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 144</p>
         </div>
         <div class="sgroup">
           <h3>Façon de mixer par style</h3>
@@ -1282,11 +1282,55 @@ limOut.connect(masterAn);
 // Auto level (refait) : l'ancien compresseur 3 bandes écrasait les médiums / aigus → son étouffé et nettement plus bas.
 // Maintenant : petite poussée (+5 dB) → « colle » très douce (ratio 1,8, attaque lente : les kicks passent) → limiteur
 // rapide qui empêche juste d'aller dans le rouge (plafond ≈ -1,5 dB). Le son garde son éclat, en un peu plus fort.
-const alPush = gain(Math.pow(10, 5 / 20));
-const glue = ctx.createDynamicsCompressor(); glue.threshold.value = -12; glue.knee.value = 12; glue.ratio.value = 1.8; glue.attack.value = 0.02; glue.release.value = 0.25;
-alPush.connect(glue); unMakeup(glue, -12, 1.8).connect(limiter);
-let autoLevel = true;
-function setAutoLevel(on){ autoLevel = on; try { masterBus.disconnect(); } catch(e){} masterBus.connect(on ? alPush : limiter); }
+// v144 : poussée +7 dB (le son sort au niveau des vrais masters, ~ -9 dBFS au lieu de -14), colle encore plus douce,
+// et limiteur À ANTICIPATION (5 ms) : il baisse le gain AVANT le pic, en douceur → plus de saturation des basses.
+const alPush = gain(Math.pow(10, 7 / 20));
+const glue = ctx.createDynamicsCompressor(); glue.threshold.value = -12; glue.knee.value = 12; glue.ratio.value = 1.5; glue.attack.value = 0.03; glue.release.value = 0.25;
+const glueOut = unMakeup(glue, -12, 1.5);
+alPush.connect(glue); glueOut.connect(limiter);
+let autoLevel = true, wlim = null, LIMGR = 0;
+const limIn = () => wlim || limiter;
+function setAutoLevel(on){ autoLevel = on; try { masterBus.disconnect(); } catch(e){} masterBus.connect(on ? alPush : limIn()); }
+// Limiteur « brickwall » à anticipation (AudioWorklet). Si le navigateur ne sait pas, le limiteur classique reste en place.
+const WLIM_SRC = `// Limiteur « brickwall » à anticipation (look-ahead) : le gain descend AVANT le pic, en douceur, et remonte lentement.
+// Pas de déformation des basses (le compresseur du navigateur réagit en 2 ms, en plein milieu d'une onde de kick → saturation).
+class WLim extends AudioWorkletProcessor {
+  static get parameterDescriptors(){ return [{name: 'ceil', defaultValue: 0.89}, {name: 'rel', defaultValue: 0.15}]; }
+  constructor(){ super(); this.N = Math.round(sampleRate * 0.005); this.buf = [new Float32Array(this.N + 1), new Float32Array(this.N + 1)]; this.w = 0;
+    this.req = new Float32Array(this.N + 1); this.qv = new Float32Array(this.N + 2); this.qi = new Int32Array(this.N + 2); this.qh = 0; this.qt = 0; this.n = 0; this.g = 1; this.gr = 0;
+    this.port.onmessage = () => this.port.postMessage(this.gr); }
+  process(ins, outs, P){
+    const I = ins[0], O = outs[0]; if (!O || !O.length) return true; const L = I && I[0], R = I && (I[1] || I[0]), oL = O[0], oR = O[1] || O[0];
+    const ceil = P.ceil[0], N = this.N, aC = 1 - Math.exp(-1 / (N * 0.45)), rC = 1 - Math.exp(-1 / (sampleRate * P.rel[0]));
+    let minG = 1;
+    for (let i = 0; i < oL.length; i++){
+      const xl = L ? L[i] : 0, xr = R ? R[i] : 0, pk = Math.max(Math.abs(xl), Math.abs(xr)), need = pk > ceil ? ceil / pk : 1;
+      // minimum glissant des gains nécessaires sur la fenêtre d'anticipation (file monotone)
+      const n = this.n++;
+      while (this.qt > this.qh && this.qv[(this.qt - 1) % (N + 2)] >= need) this.qt--;
+      this.qv[this.qt % (N + 2)] = need; this.qi[this.qt % (N + 2)] = n; this.qt++;
+      while (this.qi[this.qh % (N + 2)] <= n - N - 2) this.qh++;
+      const target = this.qv[this.qh % (N + 2)];
+      this.g += (target - this.g) * (target < this.g ? aC : rC);
+      if (this.g > target && target < this.g - 0.0) {}   // (l'anticipation laisse le temps de descendre)
+      const w = this.w, dl = this.buf[0][w], dr = this.buf[1][w]; this.buf[0][w] = xl; this.buf[1][w] = xr; this.w = (w + 1) % (N + 1);
+      let g = this.g; const yp = Math.max(Math.abs(dl), Math.abs(dr)) * g; if (yp > ceil) g = ceil / Math.max(Math.abs(dl), Math.abs(dr));   // filet : jamais au-dessus du plafond
+      oL[i] = dl * g; if (oR !== oL) oR[i] = dr * g; if (g < minG) minG = g;
+    }
+    this.gr = Math.max(this.gr * 0.9, -20 * Math.log10(minG));
+    return true;
+  }
+}
+registerProcessor('wlim', WLim);
+`;
+(async () => { try {
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WLIM_SRC], {type: 'application/javascript'})));
+  const w = new AudioWorkletNode(ctx, 'wlim', {numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2]});
+  w.parameters.get('ceil').value = Math.pow(10, -1 / 20);   // plafond -1 dB : jamais dans le rouge
+  w.port.onmessage = e => LIMGR = e.data; setInterval(() => w.port.postMessage(0), 120);
+  try { limiter.disconnect(); } catch(e){} limOut.gain.value = 1; w.connect(limOut);
+  try { glueOut.disconnect(); } catch(e){} glueOut.connect(w); wlim = w; setAutoLevel(autoLevel);
+} catch(e){} })();
 setAutoLevel(true);
 const cueBus = gain(1), cueToHp = gain(1), masterToHp = gain(0), hpSum = gain(0.8);
 const hpAn = ctx.createAnalyser(); hpAn.fftSize = 1024;
@@ -4396,7 +4440,7 @@ function drawMasterMeters(m, h){
   // Réduction automatique par bande (0 à -12 dB)
   const y = 2 * (rowH + 4), seg = (W - lab) / 3;   // 2 jauges, chacune sur 1,5 case
   g.fillStyle = autoLevel ? '#20e6e8' : '#1f4a4e'; g.fillText('AL', 0, y + rowH / 2);
-  [['C', glue], ['L', limiter]].forEach(([t, c], i) => {   // C = colle douce, L = limiteur anti-rouge
+  [['C', glue], ['L', {get reduction(){ return wlim ? -LIMGR : limiter.reduction; }}]].forEach(([t, c], i) => {   // C = colle douce, L = limiteur anti-rouge
     const x0 = lab + i * seg * 1.5, red = autoLevel ? Math.min(12, -c.reduction) : 0, bw = seg * 1.5 - 22 * dpr();
     g.fillStyle = '#4fb3b8'; g.fillText(t, x0, y + rowH / 2);
     g.fillStyle = '#0b2226'; g.fillRect(x0 + 12 * dpr(), y, bw, rowH);

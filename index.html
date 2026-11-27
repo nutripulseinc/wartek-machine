@@ -1099,7 +1099,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 146</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 147</p>
         </div>
         <div class="sgroup">
           <h3>Façon de mixer par style</h3>
@@ -2808,13 +2808,18 @@ function makePlan(o, n){
     const la = fullLevel(o.item, aStart - 16 * ob, aStart), lb = fullLevel(n.item, sn.drop, sn.drop + 16 * nb);
     rewind = {L: rl, bStart: sn.drop - rl * nb, match: la && lb ? clamp(la / lb, 0.71, 1.41) : 1};
     why = `Changement de style (${Math.round(o.bpm * o.rate)} → ${Math.round(n.bpm)} BPM) : rewind de ${o.id}, ${n.id} lancé ${rl} temps avant son B1`; }
+  let plan_voc = null;
   // RAP : on ne mélange pas, on ENCHAÎNE — et pas toujours pareil : une technique tirée au sort (jamais 2 fois de suite la même)
   if (PF.cutMix){
     if (!synced){ let c16 = grid(aStart, 16 * ob, false); if (c16 >= pos + lead && aStart - c16 <= 8 * ob) aStart = c16; }   // fin de phrase (16 temps)
+    // pas de coupure au milieu des paroles : on cherche la fin de boucle sans voix (sauf si tu as posé C toi-même)
+    if (!(o.item.markers && o.item.markers.cut != null)){ const rc = rapCut(o.item, pos + lead + 4 * ob, Math.min(limit, E - 2 * ob), ob);
+      if (rc){ aStart = rc.t; plan_voc = rc; } }
     const la = fullLevel(o.item, aStart - 16 * ob, aStart), lb = fullLevel(n.item, nStart, nStart + 16 * nb);
     const close = Math.abs(1 - (o.bpm * o.rate) / n.bpm) < 0.08, fx = rapFxPick(close);
     rewind = {L: 0, bStart: nStart, match: la && lb ? clamp(la / lb, 0.71, 1.41) : 1, fx, ratio: clamp((o.bpm * o.rate) / n.bpm, 0.9, 1.1)};
-    I = 0; why = `Rap · ${RAPFX[fx]} : ${o.id} finit sa phrase, ${n.id} entre sur son 1er temps`; }
+    rewind.voc = plan_voc;
+    I = 0; why = `Rap · ${RAPFX[fx]} : ${o.id} ${plan_voc ? (plan_voc.free ? 'sort sur une boucle sans paroles' : 'sort entre deux phrases') : 'finit sa phrase'}, ${n.id} entre sur son 1er temps`; }
   const P = aStart + I * ob;
   // B part sur son 1er kick (kick dès le début) ou I temps avant sa basse : son swap tombe pile sur P
   const bStart = (introB === 0 || !synced || (PF.cutMix && I === 0)) ? nStart : sn.drop - I * nb;
@@ -2959,6 +2964,42 @@ function schedule(d, key, v, t, tc){ plan.events.push({d, key, v, t, tc}); }
 
 // ===== Transition REWIND (changement de style) : le DJ fait tourner le vinyle de A à l'envers (pull up),
 // puis le nouveau son part quelques temps avant son B1, à SON tempo d'origine, au niveau de A.
+// ===== VOIX : où sont les paroles ? (rap) =====
+// Bande des voix (300 Hz – 3,4 kHz), enveloppe toutes les 10 ms, puis médiane sur 210 ms : les coups de batterie (courts)
+// disparaissent, il reste ce qui « tient » (voix + mélodie de l'instru). La mélodie de l'instru est à peu près constante :
+// là où ça monte nettement au-dessus du niveau « instru seule » du morceau, il y a des paroles. Résultat : un score par temps.
+function vocBeats(t){
+  if (t._voc) return t._voc;
+  if (t.ana && t.ana.voc && t.ana.voc.bpm === t.bpm && t.ana.voc.fb === t.firstBeat) return (t._voc = Float32Array.from(t.ana.voc.v));
+  try { const b = t.buffer; if (!b || !t.bpm) return null;
+    const sr = b.sampleRate, L = b.getChannelData(0), R = b.numberOfChannels > 1 ? b.getChannelData(1) : L, H = Math.round(sr / 100), nF = Math.floor(b.length / H);
+    const aH = Math.exp(-2 * Math.PI * 300 / sr), aL = 1 - Math.exp(-2 * Math.PI * 3400 / sr);
+    const env = new Float32Array(nF); let px = 0, h1 = 0, px2 = 0, h2 = 0, l1 = 0, l2 = 0;
+    for (let f = 0, i = 0; f < nF; f++){ let acc = 0;
+      for (let k = 0; k < H; k++, i++){ const v = (L[i] + R[i]) * 0.5; h1 = aH * (h1 + v - px); px = v; h2 = aH * (h2 + h1 - px2); px2 = h1; l1 += aL * (h2 - l1); l2 += aL * (l1 - l2); acc += l2 * l2; }
+      env[f] = Math.sqrt(acc / H); }
+    const M = 21, med = new Float32Array(nF), win = [];
+    for (let f = 0; f < nF; f++){ const a = Math.max(0, f - 10), z = Math.min(nF, f + 11); win.length = 0; for (let j = a; j < z; j++) win.push(env[j]); win.sort((p, q) => p - q); med[f] = win[win.length >> 1]; }
+    const T = 60 / t.bpm, fb = t.firstBeat || 0, nB = Math.floor((b.duration - fb) / T), sc = new Float32Array(Math.max(0, nB));
+    for (let k = 0; k < nB; k++){ const a = Math.floor((fb + k * T) * 100), z = Math.floor((fb + (k + 1) * T) * 100); let s2 = 0, c = 0; for (let f = a; f < z && f < nF; f++){ s2 += med[f]; c++; } sc[k] = c ? s2 / c : 0; }
+    // niveau « instru seule » : 25e percentile des temps où ça joue (on ignore les silences)
+    const on = Array.from(sc).filter(v => v > 1e-4).sort((p, q) => p - q), base = on.length ? on[Math.floor(on.length * 0.25)] : 1;
+    for (let k = 0; k < nB; k++) sc[k] = sc[k] / (base || 1);
+    t._voc = sc; if (t.ana){ t.ana.voc = {bpm: t.bpm, fb: t.firstBeat, v: Array.from(sc, v => Math.round(v * 100) / 100)}; anaSaveSoon(t); }
+    return sc; } catch(e){ return null; }
+}
+// Fin de phrase pour sortir d'un son de rap : la plus tardive (≤ hi) dont la mesure d'avant est SANS paroles (elle sert de
+// boucle pour la transition) ; sinon celle où il y a le moins de paroles juste avant. Calée sur 8 temps.
+function rapCut(t, lo, hi, ob){
+  const v = vocBeats(t); if (!v || !(hi > lo)) return null;
+  const fb = t.firstBeat || 0, T = 60 / t.bpm, k0 = Math.ceil((lo - fb) / T / 8) * 8, k1 = Math.floor((hi - fb) / T / 8) * 8;
+  const bar = k => { let m = 0; for (let j = k - 4; j < k; j++) m = Math.max(m, v[j] ?? 9); return m; };
+  let best = null, bestV = Infinity;
+  for (let k = k1; k >= Math.max(k0, k1 - 96); k -= 8){ const m = bar(k);
+    if (m < 1.45) return {t: fb + k * T, free: true, v: m};
+    if (m < bestV){ bestV = m; best = k; } }
+  return best != null ? {t: fb + best * T, free: false, v: bestV} : null;
+}
 // ===== Techniques d'enchaînement RAP / HIP-HOP =====
 const RAPFX = {rewind: 'Rewind', brake: 'Frein vinyle', echo: 'Écho + drop', scratch: 'Scratch', filter: 'Filtre + coupe', sample: 'Sample impact', passe: 'Passe-passe'};
 let RAPFX_HIST = [];
@@ -2969,7 +3010,15 @@ function startRapFx(dt){
   const {o, n} = plan, now = ctx.currentTime, T0 = now + Math.max(LEAD(), dt), beat = o.beatLen / o.rate, R = plan.rewind, fx = R.fx;
   plan.scheduled = true; plan.events = []; plan.T0 = T0;
   const toN = n.id === 'A' ? 0 : 100, toO = o.id === 'A' ? 0 : 100;
-  const cutA = t => { o.input.gain.cancelScheduledValues(0); o.input.gain.setValueAtTime(o.input.gain.value, now); o.input.gain.setValueAtTime(0, t); };
+  // BOUCLE : à T0, A ne continue pas (il partirait dans les paroles suivantes) : on rejoue en boucle sa dernière mesure
+  // (choisie sans paroles), et toute la transition se fait dessus
+  let loop = null;
+  if (fx !== 'rewind'){ try { const p1 = plan.oldStart, p0 = p1 - 4 * o.beatLen;
+    if (p0 > 0.05){ const ls = ctx.createBufferSource(), lg = ctx.createGain(); ls.buffer = o.buffer; ls.loop = true; ls.loopStart = p0; ls.loopEnd = p1; ls.playbackRate.value = o.rate;
+      lg.gain.setValueAtTime(0, T0 - 0.004); lg.gain.linearRampToValueAtTime(1, T0 + 0.004); ls.connect(lg); lg.connect(o.trimG); ls.start(T0 - 0.004, p0 - 0.004 * o.rate); loop = {ls, lg};
+      o.input.gain.cancelScheduledValues(0); o.input.gain.setValueAtTime(o.input.gain.value, now); o.input.gain.setValueAtTime(1, T0 - 0.004); o.input.gain.linearRampToValueAtTime(0, T0 + 0.004); } } catch(e){ loop = null; } }
+  const cutA = t => { if (loop){ loop.lg.gain.setValueAtTime(1, t - 0.012); loop.lg.gain.linearRampToValueAtTime(0, t); loop.ls.stop(t + 0.05); return; }
+    o.input.gain.cancelScheduledValues(0); o.input.gain.setValueAtTime(o.input.gain.value, now); o.input.gain.setValueAtTime(0, t); };
   // un bout de A (à l'endroit ou à l'envers) rejoué par-dessus : sert au scratch
   const chunk = (from, len, t, r0, r1, back) => { try { const b = o.buffer, sr = b.sampleRate, i0 = Math.max(0, Math.floor(from * sr)), L = Math.max(64, Math.floor(len * sr));
       const bf = ctx.createBuffer(b.numberOfChannels, L, sr);
@@ -2984,7 +3033,7 @@ function startRapFx(dt){
   let tB = T0, fadeIn = 2 * beat, extra = '';
   const fadeA = (t, d) => { for (let i = 1; i <= 8; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / 8, 1.4)), t + d * i / 8, 0.1); };
   if (fx === 'brake'){   // frein de platine sur 3 temps (A s'assombrit en ralentissant) ; B monte en fondu pendant la fin du frein
-    const D = 3 * beat, sA = o.src; if (sA){ sA.playbackRate.cancelScheduledValues(0); sA.playbackRate.setValueAtTime(sA.playbackRate.value, T0); sA.playbackRate.setTargetAtTime(0.02, T0, D / 3); }
+    const D = 3 * beat, sA = loop ? loop.ls : o.src; if (sA){ sA.playbackRate.cancelScheduledValues(0); sA.playbackRate.setValueAtTime(sA.playbackRate.value, T0); sA.playbackRate.setTargetAtTime(0.02, T0, D / 3); }
     schedule(o, 'filt', -24, T0 + D * 0.5, 0.4); fadeA(T0 + beat, D - beat); cutA(T0 + D + 0.05); tB = T0 + 2 * beat; fadeIn = 2 * beat;
   } else if (fx === 'echo'){   // écho long : A part en écho et s'efface sur 4 temps, B monte en fondu sur 4 temps
     schedule(o, 'fx', {name: 'echo', amt: 0.7, rate: 0.75, fb: 0.6}, T0 - beat, 0.05); fadeA(T0, 4 * beat); cutA(T0 + 4 * beat); tB = T0 + beat; fadeIn = 4 * beat;
@@ -3014,7 +3063,7 @@ function startRapFx(dt){
   n.playAt(tB - 0.006, Math.max(0, R.bStart - 0.006)); n.t0 = tB - 0.006;
   if (fx !== 'passe') schedule(null, 'xf', 50, tB, 0.02), schedule(null, 'xf', toN, tB + fadeIn, fadeIn / 3);
   plan.tDrop = tB; plan.tFade = T0; plan.tEnd = Math.max(tB + fadeIn, T0 + (fx === 'passe' ? 9 : fx === 'filter' ? 8 : 4) * beat) + 0.6;
-  plan.sortie = `Rap · ${RAPFX[fx]}${extra ? ' (' + extra + ')' : ''} : ${o.id} sur la fin de sa phrase, ${n.id} sur son 1er temps · volume ${n.id} ${(20 * Math.log10(R.match)).toFixed(1)} dB`;
+  plan.sortie = `Rap · ${RAPFX[fx]}${extra ? ' (' + extra + ')' : ''} : ${o.id} ${loop ? (R.voc && R.voc.free ? 'bouclé sur sa dernière mesure sans paroles' : 'bouclé sur sa dernière mesure') : 'sur la fin de sa phrase'}, ${n.id} sur son 1er temps · volume ${n.id} ${(20 * Math.log10(R.match)).toFixed(1)} dB`;
   plan.trickTxt = ''; plan.entree = plan.why;
 }
 function startRewind(dt, forced){

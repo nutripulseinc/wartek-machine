@@ -1103,7 +1103,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 149</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 150</p>
         </div>
         <div class="sgroup">
           <h3>Façon de mixer par style</h3>
@@ -2389,7 +2389,13 @@ function applyKit(d){ if (!d.base) return; const st = d.item && styleOf(d.item),
   const edit = !$('sedit').hidden && SE.d === d ? SE.i : -1;   // le pad en cours d'édition n'est pas touché
   for (let i = 0; i < 4; i++){ if (i === edit) continue; const sm = (k && k[i]) || d.base[i]; d.samples[i] = sm; d.padSrc[i] = (k && k[i]) ? st.n : null;
     const pn = $(`${d.id}-padn${i}`); if (pn && sm) pn.textContent = sm.label || sm.name; const pad = $(`${d.id}-pad${i}`); if (pad){ pad.classList.toggle('kit', !!(k && k[i])); if (k && k[i]) pad.style.setProperty('--kc', styCol(st.n)); } } }
+// Kits de départ livrés avec l'appli (remplacés pad par pad par ceux que tu ranges toi-même dans l'éditeur)
+const KIT_DEF = [{re: /rap|hip/i, pads: [['kits/rap/pull-up.mp3', 'Pull Up'], ['kits/rap/bomb.mp3', 'Bomb'], ['kits/rap/hey.mp3', 'Hey'], ['kits/rap/horn.mp3', 'Horn']]}];
 async function kitsLoad(){ for (const b of BACS) for (let i = 0; i < 4; i++){ try { const rec = await idb('samples', 'readonly', st => st.get(`kit|${b.n}|${i}`)); if (rec && rec.blob){ (KIT[b.n] = KIT[b.n] || [])[i] = await recSmp(rec); } } catch(e){} }
+  Object.values(decks).forEach(applyKit);
+  for (const kd of KIT_DEF) for (const b of BACS.filter(x => kd.re.test(x.n))) for (let i = 0; i < 4; i++){ const k = KIT[b.n] = KIT[b.n] || []; if (k[i] || !kd.pads[i]) continue;
+    try { const r = await fetch(kd.pads[i][0]); if (!r.ok) continue; const blob = await r.blob(); if (k[i]) continue;
+      k[i] = {name: kd.pads[i][1], label: null, blob, custom: true, builtin: true, bpm: null, start: 0, end: null, q: 'now', vol: 0, buffer: await decode(await blob.arrayBuffer())}; } catch(e){} }
   Object.values(decks).forEach(applyKit); }
 const SE = {};
 function seOpen(d, i, prev = null){ const sm = d.samples[i]; Object.assign(SE, {d, i, sm, prev, saved: false, vol: sm.vol || 0, bpm: sm.bpm ?? null, start: sm.start || 0, end: sm.end ?? null, q: sm.q || (sm.bpm ? '32' : 'now'), taps: []});
@@ -3072,7 +3078,7 @@ function renderScratch(buf, cue, beat, gainLin){
 // Priorité aux sons d'effet (impact, boom, crash, riser, fx, scratch, voix « yo/hey »…).
 function habillage(d, t, beat, v = 0.85){
   try { const all = (d.samples || []).filter(x => x && x.buffer); if (!all.length) return '';
-    const nm = x => (x.label || '') + ' ' + (x.name || ''), fx = all.filter(x => /impact|boom|crash|riser|fx|scratch|hey|yo|vox|shot|hit|siren|sir[eè]ne|whoosh/i.test(nm(x)));
+    const nm = x => (x.label || '') + ' ' + (x.name || ''), fx = all.filter(x => /impact|boom|bomb|crash|riser|fx|scratch|hey|yo|vox|shot|hit|horn|pull ?up|siren|sir[eè]ne|whoosh/i.test(nm(x)));
     const pool = fx.length ? fx : all, sm = pool[Math.floor(Math.random() * pool.length)];
     const src = ctx.createBufferSource(), g = gain(padGain(sm, d, false) * ((d.item && d.item.gainTrim) || 1) * v), dl = ctx.createDelay(2), fb = gain(0.45), wet = gain(0.6);
     src.buffer = sm.buffer; src.connect(g); g.connect(masterBus); g.connect(dl); dl.delayTime.value = Math.min(1.9, 0.75 * beat); dl.connect(fb); fb.connect(dl); dl.connect(wet); wet.connect(masterBus);

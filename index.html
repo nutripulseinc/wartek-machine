@@ -1099,7 +1099,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 144</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 145</p>
         </div>
         <div class="sgroup">
           <h3>Façon de mixer par style</h3>
@@ -2808,6 +2808,13 @@ function makePlan(o, n){
     const la = fullLevel(o.item, aStart - 16 * ob, aStart), lb = fullLevel(n.item, sn.drop, sn.drop + 16 * nb);
     rewind = {L: rl, bStart: sn.drop - rl * nb, match: la && lb ? clamp(la / lb, 0.71, 1.41) : 1};
     why = `Changement de style (${Math.round(o.bpm * o.rate)} → ${Math.round(n.bpm)} BPM) : rewind de ${o.id}, ${n.id} lancé ${rl} temps avant son B1`; }
+  // RAP : on ne mélange pas, on ENCHAÎNE — et pas toujours pareil : une technique tirée au sort (jamais 2 fois de suite la même)
+  if (PF.cutMix){
+    if (!synced){ let c16 = grid(aStart, 16 * ob, false); if (c16 >= pos + lead && aStart - c16 <= 8 * ob) aStart = c16; }   // fin de phrase (16 temps)
+    const la = fullLevel(o.item, aStart - 16 * ob, aStart), lb = fullLevel(n.item, nStart, nStart + 16 * nb);
+    const close = Math.abs(1 - (o.bpm * o.rate) / n.bpm) < 0.08, fx = rapFxPick(close);
+    rewind = {L: 0, bStart: nStart, match: la && lb ? clamp(la / lb, 0.71, 1.41) : 1, fx, ratio: clamp((o.bpm * o.rate) / n.bpm, 0.9, 1.1)};
+    I = 0; why = `Rap · ${RAPFX[fx]} : ${o.id} finit sa phrase, ${n.id} entre sur son 1er temps`; }
   const P = aStart + I * ob;
   // B part sur son 1er kick (kick dès le début) ou I temps avant sa basse : son swap tombe pile sur P
   const bStart = (introB === 0 || !synced || (PF.cutMix && I === 0)) ? nStart : sn.drop - I * nb;
@@ -2952,7 +2959,61 @@ function schedule(d, key, v, t, tc){ plan.events.push({d, key, v, t, tc}); }
 
 // ===== Transition REWIND (changement de style) : le DJ fait tourner le vinyle de A à l'envers (pull up),
 // puis le nouveau son part quelques temps avant son B1, à SON tempo d'origine, au niveau de A.
-function startRewind(dt){
+// ===== Techniques d'enchaînement RAP / HIP-HOP =====
+const RAPFX = {rewind: 'Rewind', brake: 'Frein vinyle', echo: 'Écho + drop', scratch: 'Scratch', filter: 'Filtre + coupe', sample: 'Sample impact', passe: 'Passe-passe'};
+let RAPFX_HIST = [];
+function rapFxPick(close){
+  const pool = Object.keys(RAPFX).filter(k => (close || k !== 'passe') && !RAPFX_HIST.includes(k));
+  const fx = pool[Math.floor(Math.random() * pool.length)] || 'echo'; RAPFX_HIST = [fx, ...RAPFX_HIST].slice(0, 3); return fx; }
+function startRapFx(dt){
+  const {o, n} = plan, now = ctx.currentTime, T0 = now + Math.max(LEAD(), dt), beat = o.beatLen / o.rate, R = plan.rewind, fx = R.fx;
+  plan.scheduled = true; plan.events = []; plan.T0 = T0;
+  const toN = n.id === 'A' ? 0 : 100, toO = o.id === 'A' ? 0 : 100;
+  const cutA = t => { o.input.gain.cancelScheduledValues(0); o.input.gain.setValueAtTime(o.input.gain.value, now); o.input.gain.setValueAtTime(0, t); };
+  // un bout de A (à l'endroit ou à l'envers) rejoué par-dessus : sert au scratch
+  const chunk = (from, len, t, r0, r1, back) => { try { const b = o.buffer, sr = b.sampleRate, i0 = Math.max(0, Math.floor(from * sr)), L = Math.max(64, Math.floor(len * sr));
+      const bf = ctx.createBuffer(b.numberOfChannels, L, sr);
+      for (let c = 0; c < b.numberOfChannels; c++){ const a = b.getChannelData(c), d = bf.getChannelData(c); for (let i = 0; i < L; i++) d[i] = (back ? a[i0 + L - 1 - i] : a[i0 + i]) || 0; }
+      const sN = ctx.createBufferSource(), g = ctx.createGain(); sN.buffer = bf; sN.playbackRate.setValueAtTime(r0, t); sN.playbackRate.linearRampToValueAtTime(r1, t + len / ((r0 + r1) / 2));
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(1, t + 0.004); g.gain.setValueAtTime(1, t + len / ((r0 + r1) / 2) - 0.006); g.gain.linearRampToValueAtTime(0, t + len / ((r0 + r1) / 2));
+      sN.connect(g); g.connect(o.trimG); sN.start(t); sN.stop(t + len / ((r0 + r1) / 2) + 0.02); } catch(e){} };
+  const samp = (re, t, v) => { try { const all = [...(n.samples || []), ...(o.samples || [])];
+      const sm = all.find(x => x && x.buffer && re.test((x.label || '') + ' ' + (x.name || ''))) || all.find(x => x && x.buffer && /impact/i.test((x.label || '') + x.name)); if (!sm) return '';
+      const ss = ctx.createBufferSource(), sg = ctx.createGain(); ss.buffer = sm.buffer; sg.gain.value = v; ss.connect(sg); sg.connect(masterBus); ss.start(t, sm.start || 0); return sm.label || sm.name; } catch(e){ return ''; } };
+  let tB = T0, extra = '';
+  if (fx === 'brake'){   // frein de platine : A ralentit jusqu'à l'arrêt en 1,5 temps, B repart pile 2 temps après
+    const D = 1.5 * beat, sA = o.src; if (sA){ sA.playbackRate.cancelScheduledValues(0); sA.playbackRate.setValueAtTime(sA.playbackRate.value, T0); sA.playbackRate.linearRampToValueAtTime(0.03, T0 + D); }
+    schedule(o, 'filt', -18, T0 + D * 0.4, 0.2); cutA(T0 + D); tB = T0 + 2 * beat;
+  } else if (fx === 'echo'){   // le dernier temps de A part en écho, B tombe 2 temps plus tard sur le 1
+    schedule(o, 'fx', {name: 'echo', amt: 0.75, rate: 0.75, fb: 0.55}, T0 - 0.5 * beat, 0.02); cutA(T0); tB = T0 + 2 * beat;
+  } else if (fx === 'filter'){  // A monte au filtre (passe-haut) sur 2 temps et coupe, B entre plein pot
+    for (let i = 0; i <= 4; i++) schedule(o, 'filt', Math.round(12 + 33 * i / 4), T0 + i * 0.5 * beat, 0.08);
+    schedule(o, 'fx', {name: 'echo', amt: 0.5, rate: 0.5, fb: 0.4}, T0 + 1.5 * beat, 0.02); cutA(T0 + 2 * beat); tB = T0 + 2 * beat;
+  } else if (fx === 'sample'){  // A coupe net, l'impact (ou le kick shot) claque, B arrive sur le 1 suivant
+    cutA(T0); schedule(o, 'fx', {name: 'echo', amt: 0.35, rate: 0.5, fb: 0.3}, T0 - 0.25 * beat, 0.02);
+    extra = samp(/impact|kick|boom|crash/i, T0, 0.85); tB = T0 + 2 * beat;
+  } else if (fx === 'scratch'){ // « baby scratch » sur le dernier demi-temps de A : 4 allers-retours, puis B
+    const p0 = Math.max(0.3, plan.oldStart - 0.5 * beat * o.rate), len = 0.22 * beat * o.rate;
+    cutA(T0);
+    for (let k = 0; k < 4; k++){ const t = T0 + k * 0.5 * beat; chunk(p0, len, t, 0.6, 1.5, false); chunk(p0, len, t + 0.25 * beat, 1.5, 0.6, true); }
+    tB = T0 + 2 * beat;
+  } else if (fx === 'passe'){   // passe-passe : B part calé sur le tempo de A, on alterne A/B à chaque temps, puis B reste
+    tB = T0; for (let i = 0; i < 4; i++) schedule(null, 'xf', i % 2 ? toO : toN, T0 + i * beat, 0.004);
+    schedule(null, 'xf', toN, T0 + 4 * beat, 0.004); cutA(T0 + 4 * beat);
+  } else return startRewind(dt, true);
+  // B : à fond, sur son 1er temps, au niveau de A
+  n.setRate(fx === 'passe' ? R.ratio : 1);
+  [['lo', 0], ['mid', 0], ['hi', 0], ['filt', 0], ['vol', 100]].forEach(([k, v]) => { paramAt(n, k, v, now, 0.01); n.ctl[k].set(v, false); });
+  n.item.mixTrim = R.match; n.trimG.gain.setTargetAtTime((n.item.gainTrim ?? 1) * R.match, now, 0.02);
+  n.input.gain.cancelScheduledValues(0); n.input.gain.setValueAtTime(0, tB - 0.006); n.input.gain.linearRampToValueAtTime(1, tB);
+  n.playAt(tB - 0.006, Math.max(0, R.bStart - 0.006)); n.t0 = tB - 0.006;
+  if (fx !== 'passe') schedule(null, 'xf', toN, tB, 0.02);
+  plan.tDrop = tB; plan.tFade = T0; plan.tEnd = (fx === 'passe' ? T0 + 4 * beat : tB) + 0.6;
+  plan.sortie = `Rap · ${RAPFX[fx]}${extra ? ' (' + extra + ')' : ''} : ${o.id} sur la fin de sa phrase, ${n.id} sur son 1er temps · volume ${n.id} ${(20 * Math.log10(R.match)).toFixed(1)} dB`;
+  plan.trickTxt = ''; plan.entree = plan.why;
+}
+function startRewind(dt, forced){
+  if (!forced && plan.rewind.fx) return startRapFx(dt);
   const {o, n} = plan, now = ctx.currentTime, T0 = now + Math.max(LEAD(), dt), beat = o.beatLen / o.rate, R = plan.rewind;
   const RW = clamp(2 * beat, 0.9, 1.5);   // durée du rewind (~2 temps)
   plan.scheduled = true; plan.events = []; plan.T0 = T0;

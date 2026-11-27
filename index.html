@@ -283,6 +283,8 @@ button{cursor:pointer}
 .serow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px}
 #se-name{flex:0 1 260px;min-width:160px;height:40px;padding:0 12px;border-radius:8px;border:1px solid rgba(32,230,232,.5);background:#05080a;color:#eaffff;font:600 17px inherit;font-family:inherit}
 #se-name:focus{outline:2px solid #20e6e8}
+.sekit{height:40px;min-width:220px;border-radius:8px;border:1px solid rgba(32,230,232,.5);background:#05080a;color:#eaffff;font:600 16px inherit;font-family:inherit;padding:0 10px}
+.pad.kit small::after{content:' ●';color:var(--kc,#20e6e8)}
 #sedit .dpanel{overflow:auto}#sedit .sbody{overflow:visible}.selbl{width:64px;font-size:12px;letter-spacing:.12em;opacity:.7}.seval{min-width:84px;text-align:center;font:700 20px var(--font-lcd,monospace);color:#20e6e8}.dbtn.seq[aria-pressed="true"]{background:#20e6e8;color:#000}
 .pad.armed{animation:padArm .25s steps(2) infinite}@keyframes padArm{50%{filter:brightness(1.8);box-shadow:0 0 0 3px #fff,0 0 24px var(--pc)}}
 .drawer{position:absolute;inset:0;background:rgba(4,5,6,.74);border-radius:12px;display:grid;place-items:center;z-index:5;touch-action:auto}
@@ -1073,10 +1075,12 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
     <div class="dpanel" role="dialog" aria-label="Réglage du sample">
       <div class="dhead"><h2 id="se-title">Sample</h2><button class="dbtn" id="se-close" data-close>Fermer</button></div>
       <div class="sbody">
-        <div class="serow" style="margin-top:0"><b class="selbl">Nom</b><input id="se-name" maxlength="18" placeholder="ex. Impact, Sirène…" autocomplete="off" spellcheck="false"><span class="snote" style="margin:0">nom affiché sur le bouton du sample</span></div>
+        <div class="serow" style="margin-top:0"><b class="selbl">Style</b><select id="se-kit" class="sekit" aria-label="Pour quel style"></select><span class="snote" style="margin:0">ce pad se charge quand un son de ce style est sur la platine</span></div>
+        <div class="serow"><b class="selbl">Nom</b><input id="se-name" maxlength="18" placeholder="ex. Impact, Sirène…" autocomplete="off" spellcheck="false"><span class="snote" style="margin:0">nom affiché sur le bouton du sample</span></div>
         <canvas id="se-cv" style="width:100%;height:104px;display:block;border-radius:8px;background:#05080a;touch-action:none;cursor:crosshair;margin-top:10px"></canvas>
         <div class="serow"><b class="selbl">BPM</b><button class="dbtn" data-sb="-1">−1</button><button class="dbtn" data-sb="-0.1">−0,1</button><b id="se-bpm" class="seval">—</b><button class="dbtn" data-sb="0.1">+0,1</button><button class="dbtn" data-sb="1">+1</button><button class="dbtn" data-sb="h">÷2</button><button class="dbtn" data-sb="d">×2</button><button class="dbtn" id="se-tap">👆 TAP</button><button class="dbtn" data-sb="n">Sans BPM</button></div>
         <div class="serow"><b class="selbl">Début</b><button class="dbtn" data-ss="-0.01">◀ 10 ms</button><button class="dbtn" data-ss="-0.001">◀ 1 ms</button><b id="se-start" class="seval">0 ms</b><button class="dbtn" data-ss="0.001">1 ms ▶</button><button class="dbtn" data-ss="0.01">10 ms ▶</button><button class="dbtn" data-ss="b">1 temps ▶</button></div>
+        <div class="serow"><b class="selbl">Volume</b><button class="dbtn" data-sv="-3">−3 dB</button><button class="dbtn" data-sv="-1">−1</button><b id="se-vol" class="seval">0 dB</b><button class="dbtn" data-sv="1">+1</button><button class="dbtn" data-sv="3">+3 dB</button><button class="dbtn" data-sv="0">0</button><span class="snote" style="margin:0">0 dB = niveau conseillé (un peu sous la musique)</span></div>
         <div class="serow"><b class="selbl">Fin</b><button class="dbtn" data-se="-b">◀ 1 temps</button><button class="dbtn" data-se="-0.01">◀ 10 ms</button><b id="se-end" class="seval">fin</b><button class="dbtn" data-se="0.01">10 ms ▶</button><button class="dbtn" data-se="b">1 temps ▶</button><button class="dbtn" data-se="x" title="Enlever le point B : le sample joue jusqu'au bout">✕ B</button></div>
         <div class="serow"><b class="selbl">Départ</b><button class="dbtn seq" data-sq="32">Au 32 suivant</button><button class="dbtn seq" data-sq="16">Au 16 suivant</button><button class="dbtn seq" data-sq="4">Mesure suivante</button><button class="dbtn seq" data-sq="now">Tout de suite</button></div>
         <div class="serow"><button class="dbtn" id="se-play">▶ Écouter avec le clic</button><button class="dbtn" id="se-file">Choisir un autre son</button><button class="dbtn" id="se-save" style="color:#20e6e8;border-color:#20e6e8">Enregistrer</button></div>
@@ -1099,7 +1103,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 148</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 149</p>
         </div>
         <div class="sgroup">
           <h3>Façon de mixer par style</h3>
@@ -1940,7 +1944,7 @@ class Deck {
   get beatLen(){ return this.bpm ? 60 / this.bpm : 0; }
   pos(){ return this.playing ? Math.min(this.duration, Math.max(0, this.offset + (ctx.currentTime - this.t0) * this.rate)) : this.offset; }
   load(item){
-    this.pause();
+    this.pause(); setTimeout(() => applyKit(this), 0);
     this.item = item; this.buffer = item.buffer; this.bpm = item.bpm; this.firstBeat = item.firstBeat || 0;
     if (item.gainTrim == null && item.buffer){ const lv = levelTrim(item.buffer); item.gainTrim = lv.trim; item.lvlInfo = lv; }
     item.mixTrim = 1; this.trimG.gain.setValueAtTime(item.gainTrim ?? 1, ctx.currentTime);
@@ -2059,7 +2063,7 @@ class Deck {
     const s = this.samples[i]; if (!s || !s.buffer) return;
     this.armed = this.armed || {};
     if (this.armed[i]){ try { this.armed[i].src.stop(); } catch(e){} clearTimeout(this.armed[i].tm); this.armed[i] = null; $(`${this.id}-pad${i}`).classList.remove('armed'); toast('Sample annulé.', 1200); return; }
-    const src = ctx.createBufferSource(); src.buffer = s.buffer; const g = gain(0.9); src.connect(g); g.connect(this.input);
+    const src = ctx.createBufferSource(); src.buffer = s.buffer; const g = gain(padGain(s, this)); src.connect(g); g.connect(this.input);
     const now = ctx.currentTime;
     if (s.bpm && s.q && s.q !== 'now' && this.playing && this.bpm){
       const T = this.beatLen, P = +s.q, pos = this.pos(); let org = this.firstBeat; try { const st = structureOf(this.item); if (st && st.drop != null) org = st.drop; } catch(e){}
@@ -2075,6 +2079,13 @@ class Deck {
     src.start(now, s.start || 0); padEnd(s, src, g, now);
   }
 }
+// NIVEAU DES SAMPLES : chaque sample est ramené à un niveau « fort » commun, un peu SOUS la musique (≈ -5 dB),
+// quel que soit le fichier (beaucoup de samples sont normalisés à fond) ; puis le réglage Volume de l'éditeur (dB).
+function sRms(s){ if (s._rms) return s._rms; try { const b = s.buffer, sr = b.sampleRate, d = b.getChannelData(0), i0 = Math.floor((s.start || 0) * sr), i1 = Math.min(b.length, s.end ? Math.floor(s.end * sr) : b.length), W = Math.max(64, Math.round(0.05 * sr)), v = [];
+  for (let a = i0; a + W <= i1; a += W){ let q = 0; for (let i = a; i < a + W; i++) q += d[i] * d[i]; v.push(Math.sqrt(q / W)); }
+  if (!v.length) return (s._rms = 0.2); v.sort((x, y) => x - y); return (s._rms = Math.max(0.01, v[Math.floor(v.length * 0.9)])); } catch(e){ return 0.2; } }
+function padGain(s, d, trimmed = true){ const tr = (d && d.item && d.item.gainTrim) || 1;
+  return clamp(0.14 / (sRms(s) * (trimmed ? tr : 1)), 0.03, 0.8) * Math.pow(10, (s.vol || 0) / 20); }
 // Point B du sample : arrêt avec un fondu de 8 ms (pas de clic), en tenant compte de la vitesse de lecture
 function padEnd(s, src, g, t0){ if (s.end == null || !(s.end > (s.start || 0))) return;
   const te = t0 + (s.end - (s.start || 0)) / src.playbackRate.value; g.gain.setValueAtTime(g.gain.value, te - 0.008); g.gain.linearRampToValueAtTime(0, te); src.stop(te + 0.01); }
@@ -2364,18 +2375,34 @@ function sampleBpm(buf, start, ref, name){
   for (const n of [2, 4, 8, 16, 32, 64, 128]){ const b = n * 60 / dur; if (b < 70 || b > 260) continue;
     const sc = Math.abs(Math.log2(b / ref)) + (b < 110 || b > 230 ? 0.6 : 0); if (sc < bs){ bs = sc; best = b; } }
   if (!best) return null; best = Math.round(best * 10) / 10; if (Math.abs(best - Math.round(best)) <= 0.35) best = Math.round(best); return best; }
-async function sampleSave(d, i){ const sm = d.samples[i]; if (!sm || !sm.blob) return;
-  try { await idb('samples', 'readwrite', st => st.put({name: sm.name, label: sm.label || null, end: sm.end ?? null, blob: sm.blob, bpm: sm.bpm, start: sm.start, q: sm.q}, `${d.id}${i}`)); }
+const smpRec = sm => ({name: sm.name, label: sm.label || null, end: sm.end ?? null, blob: sm.blob, bpm: sm.bpm, start: sm.start, q: sm.q, vol: sm.vol || 0});
+const recSmp = async rec => ({name: rec.name, blob: rec.blob, custom: true, bpm: rec.bpm ?? null, start: rec.start ?? 0, q: rec.q ?? 'now', label: rec.label || null, end: rec.end ?? null, vol: rec.vol || 0, buffer: await decode(await rec.blob.arrayBuffer())});
+async function sampleSave(d, i, sm = d.samples[i]){ if (!sm || !sm.blob) return;
+  try { await idb('samples', 'readwrite', st => st.put(smpRec(sm), `${d.id}${i}`)); }
   catch(err){ toast('Pas de place pour garder ce sample : il sera à remettre la prochaine fois.'); } }
+// KITS PAR STYLE : 4 pads par style. Quand un son de ce style arrive sur une platine, ses pads prennent le kit du style ;
+// un pad sans sample dans le kit garde le sample « tous styles » de la platine.
+const KIT = {};
+async function kitSave(style, i){ const sm = KIT[style] && KIT[style][i];
+  try { if (sm) await idb('samples', 'readwrite', st => st.put(smpRec(sm), `kit|${style}|${i}`)); else await idb('samples', 'readwrite', st => st.delete(`kit|${style}|${i}`)); } catch(e){ toast('Pas de place pour garder ce sample.'); } }
+function applyKit(d){ if (!d.base) return; const st = d.item && styleOf(d.item), k = st && KIT[st.n]; d.padSrc = d.padSrc || [];
+  const edit = !$('sedit').hidden && SE.d === d ? SE.i : -1;   // le pad en cours d'édition n'est pas touché
+  for (let i = 0; i < 4; i++){ if (i === edit) continue; const sm = (k && k[i]) || d.base[i]; d.samples[i] = sm; d.padSrc[i] = (k && k[i]) ? st.n : null;
+    const pn = $(`${d.id}-padn${i}`); if (pn && sm) pn.textContent = sm.label || sm.name; const pad = $(`${d.id}-pad${i}`); if (pad){ pad.classList.toggle('kit', !!(k && k[i])); if (k && k[i]) pad.style.setProperty('--kc', styCol(st.n)); } } }
+async function kitsLoad(){ for (const b of BACS) for (let i = 0; i < 4; i++){ try { const rec = await idb('samples', 'readonly', st => st.get(`kit|${b.n}|${i}`)); if (rec && rec.blob){ (KIT[b.n] = KIT[b.n] || [])[i] = await recSmp(rec); } } catch(e){} }
+  Object.values(decks).forEach(applyKit); }
 const SE = {};
-function seOpen(d, i){ const sm = d.samples[i]; Object.assign(SE, {d, i, bpm: sm.bpm ?? null, start: sm.start || 0, end: sm.end ?? null, q: sm.q || (sm.bpm ? '32' : 'now'), taps: []});
-  $('se-title').textContent = `Sample ${i + 1} · ${sm.name}`; $('se-name').value = sm.label || ''; $('sedit').hidden = false; seShow(); }
+function seOpen(d, i, prev = null){ const sm = d.samples[i]; Object.assign(SE, {d, i, sm, prev, saved: false, vol: sm.vol || 0, bpm: sm.bpm ?? null, start: sm.start || 0, end: sm.end ?? null, q: sm.q || (sm.bpm ? '32' : 'now'), taps: []});
+  $('se-title').textContent = `Sample ${i + 1} · ${sm.name}`; $('se-name').value = sm.label || '';
+  const cur = (d.padSrc && d.padSrc[i]) || '';
+  $('se-kit').innerHTML = `<option value="">Tous les styles (cette platine)</option>` + BACS.map(b => `<option value="${esc(b.n)}"${cur === b.n ? ' selected' : ''}>${esc(b.n)}</option>`).join('');
+  $('se-vol').textContent = `${SE.vol > 0 ? '+' : ''}${SE.vol} dB`; $('sedit').hidden = false; seShow(); }
 function seStop(){ if (SE.play){ SE.play.forEach(n => { try { n.stop(); } catch(e){} }); SE.play = null; $('se-play').textContent = '▶ Écouter avec le clic'; } }
 function seShow(){
   $('se-bpm').textContent = SE.bpm ? SE.bpm.toFixed(SE.bpm % 1 ? 1 : 0) : 'aucun'; $('se-start').textContent = `${Math.round(SE.start * 1000)} ms`;
   $('se-end').textContent = SE.end == null ? 'fin' : `${(SE.end - SE.start).toFixed(2)} s`;
   document.querySelectorAll('[data-sq]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.sq === SE.q)));
-  const sm = SE.d.samples[SE.i], cv = $('se-cv'), W = cv.width = cv.clientWidth * 2, H = cv.height = cv.clientHeight * 2, g = cv.getContext('2d'), x = sm.buffer.getChannelData(0), dur = sm.buffer.duration;
+  const sm = SE.sm, cv = $('se-cv'), W = cv.width = cv.clientWidth * 2, H = cv.height = cv.clientHeight * 2, g = cv.getContext('2d'), x = sm.buffer.getChannelData(0), dur = sm.buffer.duration;
   g.clearRect(0, 0, W, H); g.fillStyle = '#7fd8e0'; const st = Math.max(1, Math.floor(x.length / W));
   for (let px = 0; px < W; px++){ let mx = 0; for (let k = px * st; k < (px + 1) * st && k < x.length; k++) mx = Math.max(mx, Math.abs(x[k])); g.fillRect(px, H / 2 - mx * H * 0.45, 1, mx * H * 0.9); }
   if (SE.bpm){ const T = 60 / SE.bpm; for (let k = 0; SE.start + k * T < dur; k++){ const X = (SE.start + k * T) / dur * W; g.fillStyle = k % 4 ? 'rgba(255,255,255,.25)' : 'rgba(255,181,71,.9)'; g.fillRect(X, 0, k % 4 ? 1 : 2, H); } }
@@ -2389,8 +2416,9 @@ function seShow(){
 document.querySelectorAll('[data-sb]').forEach(b => b.addEventListener('click', () => { const v = b.dataset.sb;
   if (v === 'n') SE.bpm = null; else if (!SE.bpm) SE.bpm = 150; else if (v === 'h') SE.bpm /= 2; else if (v === 'd') SE.bpm *= 2; else SE.bpm = Math.round((SE.bpm + parseFloat(v)) * 10) / 10;
   if (SE.bpm) SE.bpm = clamp(SE.bpm, 40, 300); if (!SE.bpm) SE.q = 'now'; else if (SE.q === 'now') SE.q = '32'; seStop(); seShow(); }));
+document.querySelectorAll('[data-sv]').forEach(b => b.addEventListener('click', () => { const v = +b.dataset.sv; SE.vol = v === 0 ? 0 : clamp(SE.vol + v, -24, 9); $('se-vol').textContent = `${SE.vol > 0 ? '+' : ''}${SE.vol} dB`; seStop(); }));
 const seBeat = () => SE.bpm ? 60 / SE.bpm : 0.25;
-const seDur = () => SE.d.samples[SE.i].buffer.duration;
+const seDur = () => SE.sm.buffer.duration;
 document.querySelectorAll('[data-ss]').forEach(b => b.addEventListener('click', () => { const v = b.dataset.ss, dv = v === 'b' ? seBeat() : parseFloat(v);
   SE.start = clamp(SE.start + dv, 0, (SE.end ?? seDur()) - 0.02); seStop(); seShow(); }));
 // FIN (point B) : le sample s'arrête là (petit fondu de 8 ms, sans clic)
@@ -2410,13 +2438,13 @@ document.querySelectorAll('[data-se]').forEach(b => b.addEventListener('click', 
 document.querySelectorAll('[data-sq]').forEach(b => b.addEventListener('click', () => { if (!SE.bpm && b.dataset.sq !== 'now'){ toast('Donne d\'abord un BPM au sample.'); return; } SE.q = b.dataset.sq; seShow(); }));
 $('se-tap').addEventListener('pointerdown', () => { const t = performance.now(); SE.taps = SE.taps.filter(x => t - x < 2500); SE.taps.push(t);
   if (SE.taps.length >= 4){ const iv = []; for (let k = 1; k < SE.taps.length; k++) iv.push(SE.taps[k] - SE.taps[k - 1]); iv.sort((a, b) => a - b);
-    const tb = 60000 / iv[Math.floor(iv.length / 2)], dur = SE.d.samples[SE.i].buffer.duration - SE.start;
+    const tb = 60000 / iv[Math.floor(iv.length / 2)], dur = SE.sm.buffer.duration - SE.start;
     let best = tb; for (const n of [2, 4, 8, 16, 32, 64, 128]){ const b = n * 60 / dur; if (Math.abs(b / tb - 1) < Math.abs(best / tb - 1) || best === tb) if (Math.abs(b / tb - 1) < 0.08) best = b; }   // on accroche le BPM « rond » le plus proche
     SE.bpm = Math.round(best * 10) / 10; if (Math.abs(SE.bpm - Math.round(SE.bpm)) <= 0.35) SE.bpm = Math.round(SE.bpm); if (SE.q === 'now') SE.q = '32'; seShow(); }
   $('se-tap').textContent = `👆 ${SE.taps.length}`; clearTimeout(SE.tapT); SE.tapT = setTimeout(() => { $('se-tap').textContent = '👆 TAP'; SE.taps = []; }, 2500); });
 $('se-play').addEventListener('click', () => { if (SE.play){ seStop(); return; }
   const live = Object.values(decks).some(d => d.playing); if (live && route === 'normal'){ toast('Un son joue sur l\'enceinte : passe la sortie casque en « Câble séparateur » ou « Casque seul » pour écouter ici sans que le public l\'entende.'); return; }
-  const sm = SE.d.samples[SE.i], bus = live ? cueBus : masterBus, t0 = ctx.currentTime + 0.08, src = ctx.createBufferSource(), mg = gain(0.5); src.buffer = sm.buffer; src.connect(mg); mg.connect(bus); src.start(t0, SE.start);
+  const sm = SE.sm, bus = live ? cueBus : masterBus, t0 = ctx.currentTime + 0.08, src = ctx.createBufferSource(), mg = gain(padGain({...sm, vol: SE.vol, _rms: sRms(sm)}, SE.d, false) * ((SE.d.item && SE.d.item.gainTrim) || 1)); src.buffer = sm.buffer; src.connect(mg); mg.connect(bus); src.start(t0, SE.start);
   if (SE.end != null){ const te = t0 + SE.end - SE.start; mg.gain.setValueAtTime(0.5, te - 0.008); mg.gain.linearRampToValueAtTime(0, te); src.stop(te + 0.01); }
   const nodes = [src];
   if (SE.bpm){ const T = 60 / SE.bpm, n = Math.floor(((SE.end ?? sm.buffer.duration) - SE.start) / T) + 1;
@@ -2425,9 +2453,13 @@ $('se-play').addEventListener('click', () => { if (SE.play){ seStop(); return; }
   SE.play = nodes; $('se-play').textContent = '■ Stop'; src.onended = seStop; });
 $('se-file').addEventListener('click', () => { seStop(); padTarget = {d: SE.d, i: SE.i}; $('sedit').hidden = true; $('pad-file').click(); });
 $('se-close').addEventListener('click', () => { seStop(); $('sedit').hidden = true; });
-$('se-save').addEventListener('click', async () => { seStop(); const sm = SE.d.samples[SE.i]; const lb = $('se-name').value.trim().slice(0, 18);
-  Object.assign(sm, {bpm: SE.bpm, start: SE.start, end: SE.end, q: SE.q, label: lb || null}); $(`${SE.d.id}-padn${SE.i}`).textContent = lb || sm.name;
-  await sampleSave(SE.d, SE.i); $('sedit').hidden = true;
+$('se-save').addEventListener('click', async () => { seStop(); const d = SE.d, i = SE.i, sm = SE.sm; d.samples[i] = sm; const lb = $('se-name').value.trim().slice(0, 18);
+  Object.assign(sm, {bpm: SE.bpm, start: SE.start, end: SE.end, q: SE.q, label: lb || null, vol: SE.vol}); sm._rms = 0;
+  const kit = $('se-kit').value, was = d.padSrc && d.padSrc[i];
+  if (kit){ (KIT[kit] = KIT[kit] || [])[i] = sm; await kitSave(kit, i); if (was && was !== kit){ KIT[was][i] = null; await kitSave(was, i); } }
+  else { if (was){ KIT[was][i] = null; await kitSave(was, i); } d.base[i] = sm; await sampleSave(d, i, sm); }
+  SE.saved = true; $('sedit').hidden = true; Object.values(decks).forEach(applyKit);
+  if (kit) toast(`Sample rangé dans le kit « ${kit} » : il se charge quand un son ${kit} est sur la platine.`, 3200);
   toast(SE.bpm ? `Sample ${SE.i + 1} : ${SE.bpm} BPM, part ${SE.q === 'now' ? 'tout de suite' : SE.q === '4' ? 'à la mesure suivante' : 'au début du ' + SE.q + ' suivant'}, au tempo du son.` : `Sample ${SE.i + 1} : part tout de suite.`, 3500); });
 let padTarget = null;
 $('pad-file').addEventListener('change', async e => {
@@ -2437,9 +2469,9 @@ $('pad-file').addEventListener('change', async e => {
     const buf = await decode(await f.arrayBuffer());
     const {d, i} = padTarget, name = f.name.replace(/\.[^.]+$/, '');
     const start = sampleStart(buf), bpm = sampleBpm(buf, start, d.bpm ? d.bpm * d.rate : 150, name);
-    d.samples[i] = {name, buffer: buf, blob: f, custom: true, bpm, start, end: null, label: null, q: bpm ? '32' : 'now'}; $(`${d.id}-padn${i}`).textContent = name; $(`${d.id}-padset${i}`).classList.add('custom');
-    await sampleSave(d, i);
-    seOpen(d, i);
+    const prev = d.samples[i];
+    d.samples[i] = {name, buffer: buf, blob: f, custom: true, bpm, start, end: null, label: null, vol: 0, q: bpm ? '32' : 'now'}; $(`${d.id}-padn${i}`).textContent = name; $(`${d.id}-padset${i}`).classList.add('custom');
+    seOpen(d, i, prev);   // gardé seulement si tu appuies sur Enregistrer (tu choisis alors : cette platine ou le kit d'un style)
     toast(bpm ? `Sample ${i + 1} : ${name} · ${bpm} BPM trouvé. Vérifie avec « Écouter avec le clic », puis Enregistrer.` : `Sample ${i + 1} : ${name} (son court, part tout de suite).`, 4200);
   } catch(err){ toast('Ce son n\'a pas pu être lu. Essaie un MP3, WAV ou M4A.'); }
 });
@@ -3036,6 +3068,18 @@ function renderScratch(buf, cue, beat, gainLin){
   }
   return out;
 }
+// HABILLAGE d'une coupure : un sample du son qui ENTRE (son kit de style, sinon ses pads), joué avec un écho qui s'éteint.
+// Priorité aux sons d'effet (impact, boom, crash, riser, fx, scratch, voix « yo/hey »…).
+function habillage(d, t, beat, v = 0.85){
+  try { const all = (d.samples || []).filter(x => x && x.buffer); if (!all.length) return '';
+    const nm = x => (x.label || '') + ' ' + (x.name || ''), fx = all.filter(x => /impact|boom|crash|riser|fx|scratch|hey|yo|vox|shot|hit|siren|sir[eè]ne|whoosh/i.test(nm(x)));
+    const pool = fx.length ? fx : all, sm = pool[Math.floor(Math.random() * pool.length)];
+    const src = ctx.createBufferSource(), g = gain(padGain(sm, d, false) * ((d.item && d.item.gainTrim) || 1) * v), dl = ctx.createDelay(2), fb = gain(0.45), wet = gain(0.6);
+    src.buffer = sm.buffer; src.connect(g); g.connect(masterBus); g.connect(dl); dl.delayTime.value = Math.min(1.9, 0.75 * beat); dl.connect(fb); fb.connect(dl); dl.connect(wet); wet.connect(masterBus);
+    wet.gain.setValueAtTime(0.6, t + 2 * beat); wet.gain.linearRampToValueAtTime(0, t + 6 * beat);
+    src.start(t, sm.start || 0); if (sm.end) src.stop(t + (sm.end - (sm.start || 0)) + 0.02);
+    setTimeout(() => { try { dl.disconnect(); fb.disconnect(); wet.disconnect(); } catch(e){} }, (t - ctx.currentTime + 7 * beat) * 1000);
+    return sm.label || sm.name; } catch(e){ return ''; } }
 // ===== Techniques d'enchaînement RAP / HIP-HOP =====
 const RAPFX = {rewind: 'Rewind', brake: 'Frein vinyle', echo: 'Écho + drop', scratch: 'Scratch', filter: 'Filtre + coupe', sample: 'Sample impact', passe: 'Passe-passe'};
 let RAPFX_HIST = [];
@@ -3080,7 +3124,7 @@ function startRapFx(dt){
     fadeA(T0 + 3 * beat, 5 * beat); schedule(o, 'fx', {name: 'echo', amt: 0.45, rate: 0.5, fb: 0.45}, T0 + 6 * beat, 0.05); cutA(T0 + 8 * beat); tB = T0 + 4 * beat; fadeIn = 4 * beat;
   } else if (fx === 'sample'){  // A part en écho sur 4 temps, l'impact claque quand B arrive (en fondu court)
     schedule(o, 'fx', {name: 'echo', amt: 0.6, rate: 0.5, fb: 0.5}, T0 - 0.5 * beat, 0.05); fadeA(T0, 4 * beat); cutA(T0 + 4 * beat);
-    tB = T0 + 2 * beat; fadeIn = beat; extra = samp(/impact|kick|boom|crash/i, tB, 0.8);
+    tB = T0 + 2 * beat; fadeIn = beat; extra = habillage(n, tB, beat, 1);
   } else if (fx === 'scratch'){ // vrai scratch sur 2 mesures par-dessus la boucle de A, puis par-dessus B qui arrive
     try { const p1 = plan.oldStart, cue = scratchCue(o.buffer, Math.max(0, p1 - 4 * o.beatLen), p1);
       const sb = renderScratch(o.buffer, cue, beat, (o.item.gainTrim ?? 1) * (o.item.mixTrim ?? 1));
@@ -3096,6 +3140,7 @@ function startRapFx(dt){
     const seq = [0, 2, 4, 5, 6, 7]; seq.forEach((b, i) => schedule(null, 'xf', i % 2 ? toO : toN, T0 + b * beat, 0.006));
     schedule(null, 'xf', toN, T0 + 8 * beat, 0.006); fadeA(T0 + 7 * beat, 2 * beat); tailA(T0 + 9 * beat); cutA(T0 + 9 * beat);
   } else return startRewind(dt, true);
+  if (fx === 'brake' || fx === 'echo' || fx === 'filter') extra = habillage(n, tB, beat, 0.75);   // petit sample + écho pour habiller la coupure
   // B : à fond, sur son 1er temps, au niveau de A
   n.setRate(fx === 'passe' ? R.ratio : 1);
   [['lo', 0], ['mid', 0], ['hi', 0], ['filt', 0], ['vol', 100]].forEach(([k, v]) => { paramAt(n, k, v, now, 0.01); n.ctl[k].set(v, false); });
@@ -3301,8 +3346,10 @@ function startTransition(dt){
     else {
       const fb = 4;
       for (let i = 1; i <= fb; i++) schedule(o, 'vol', Math.round(100 * Math.pow(1 - i / fb, 1.3)), tF + (i - 1) * beat, 0.12);
+      // tempos pas mixables : la coupure est habillée (écho sur la fin de A + un sample du kit de B avec son écho)
+      if (!plan.synced){ schedule(o, 'fx', {name: 'echo', amt: 0.6, rate: 0.75, fb: 0.5}, tF - 0.5 * beat, 0.05); plan.habille = habillage(n, tF, beat, 0.8); }
       plan.tFade = tCut; plan.tEnd = tF + fb * beat + 0.3;
-      plan.sortie = !plan.synced ? `Tempos trop éloignés : ${n.id} lancé sur son K1 à la coupure de ${o.id}, ${o.id} éteint en 4 temps` : tailB === 0 ? `C = F : ${o.id} éteint en douceur sur 4 temps` : `C→F : ${tailB} temps, ${steps} palier(s) de 16 temps (CFX ${fStart}→${fEnd}, médiums 0→-9 dB, aigus -4→-10 dB), extinction douce à F`;
+      plan.sortie = !plan.synced ? `Tempos trop éloignés : ${n.id} lancé sur son K1 à la coupure de ${o.id}, ${o.id} éteint en 4 temps avec écho${plan.habille ? ' + sample « ' + plan.habille + ' »' : ''}` : tailB === 0 ? `C = F : ${o.id} éteint en douceur sur 4 temps` : `C→F : ${tailB} temps, ${steps} palier(s) de 16 temps (CFX ${fStart}→${fEnd}, médiums 0→-9 dB, aigus -4→-10 dB), extinction douce à F`;
     }
   }
   // Trick DJ sur la petite coupure de fin des 32 premiers temps :
@@ -4155,7 +4202,7 @@ function renderSbar(id){
     + `<button class="chip${lib.some(t => t.fav) ? '' : ' zero'}" data-chip="★" style="--sc:#ffd23f" aria-pressed="${STY.filter === '★'}">★ Favoris<b>${lib.filter(t => t.fav).length}</b></button>`
     + BACS.map(x => { const c = cnt(x.n); return `<button class="chip${c ? '' : ' zero'}" data-chip="${esc(x.n)}" style="--sc:${x.c}" aria-pressed="${STY.filter === x.n}">${esc(x.n)}<b>${c}</b></button>`; }).join('')
     + (id === 'dl-sbar' ? `<button class="chip" data-chipadd="1" style="--sc:#888">＋ Bac</button>` : ''); }
-function setStyle(list, n){ list.forEach(t => { t.style = n || null; t.styleSrc = 'main'; saveTrack(t); }); }   // choisi à la main : jamais touché par les scans
+function setStyle(list, n){ list.forEach(t => { t.style = n || null; t.styleSrc = 'main'; saveTrack(t); }); Object.values(decks).forEach(d => list.includes(d.item) && applyKit(d)); }   // choisi à la main : jamais touché par les scans
 // Style lu dans le fichier (tag « genre » des MP3 / M4A / FLAC), une seule fois par son
 const GENRE_MAP = [[/speedcore|extratone|splittercore/i, 'Speedcore'], [/uptempo/i, 'Uptempo'], [/hardcore|gabber|frenchcore|terror/i, 'Hardcore'], [/rawstyle|raw ?hard/i, 'Rawstyle'],
   [/hardstyle|hard ?dance|euphoric/i, 'Hardstyle'], [/tribe|tekno|free ?party|hardtek/i, 'Tribe'], [/dubstep|riddim|bass music/i, 'Dubstep'], [/drum|dnb|jungle|neuro/i, 'Drum & Bass'],
@@ -4254,7 +4301,8 @@ document.addEventListener('click', e => { const b = e.target.closest('[data-open
 $('route').addEventListener('click', () => openPanel('settings'));
 document.querySelectorAll('.drawer').forEach(dr => {
   dr.addEventListener('pointerdown', e => { if (e.target === dr) dr.hidden = true; });
-  dr.querySelector('[data-close]').addEventListener('click', () => dr.hidden = true);
+  dr.querySelector('[data-close]').addEventListener('click', () => { dr.hidden = true;
+    if (dr.id === 'sedit' && SE.prev && !SE.saved){ SE.d.samples[SE.i] = SE.prev; const pn = $(`${SE.d.id}-padn${SE.i}`); if (pn) pn.textContent = SE.prev.label || SE.prev.name; SE.prev = null; } });
 });
 $('dlist').addEventListener('click', e => {
   const up = e.target.closest('button[data-up]');
@@ -5136,9 +5184,11 @@ applySkin(savedSkin);
   for (const d of Object.values(decks)) for (let i = 0; i < 4; i++){
     try {
       const rec = await idb('samples', 'readonly', st => st.get(`${d.id}${i}`));
-      if (rec && rec.blob){ d.samples[i] = {name: rec.name, blob: rec.blob, custom: true, bpm: rec.bpm ?? null, start: rec.start ?? 0, q: rec.q ?? 'now', label: rec.label || null, end: rec.end ?? null, buffer: await decode(await rec.blob.arrayBuffer())}; $(`${d.id}-padn${i}`).textContent = rec.label || rec.name; $(`${d.id}-padset${i}`).classList.add('custom'); }
+      if (rec && rec.blob){ d.samples[i] = await recSmp(rec); $(`${d.id}-padn${i}`).textContent = rec.label || rec.name; $(`${d.id}-padset${i}`).classList.add('custom'); }
     } catch(e){}
   }
+  for (const d of Object.values(decks)) d.base = d.samples.slice();
+  kitsLoad();
   let saved = [];
   try {
     const recs = await idb('tracks', 'readonly', st => st.getAll()) || [];

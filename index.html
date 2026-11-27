@@ -1103,7 +1103,7 @@ body[data-skin="horror"] .mixer{background:var(--sp3) 4% 34%/120px 120px no-repe
         </div>
         <div class="sgroup">
           <h3>Version</h3>
-          <p class="snote" id="appver">WARTEK MACHINE · version 150</p>
+          <p class="snote" id="appver">WARTEK MACHINE · version 151</p>
         </div>
         <div class="sgroup">
           <h3>Façon de mixer par style</h3>
@@ -2575,12 +2575,19 @@ function fxAt(d, v, t, tc = 0.05){
   if (d.fxIn && nm && d.fxIn[nm]){ d.fxHold = d.fxHold || {}; if (a > 0){ d.fxHold[nm] = true; d.fxGate(nm, true); } else { d.fxHold[nm] = false; d.fxGate(nm, false); } }
   set(d.flWet, nm === 'flanger' ? a * 0.85 : 0); set(d.chWet, 0); set(d.rvWet, 0);
   set(d.ecWet, nm === 'echo' ? a * 0.85 : 0); set(d.crWet, nm === 'crush' ? a : 0);
+  const endRoll = d.rollOn && nm !== 'roll';
   [d.dlWet, d.ppWet, d.spWet, d.hxWet, d.rlWet, d.phWet, d.afWet, d.nzWet].forEach(g => set(g, 0)); if (d.rollOn){ d.rlFb.gain.setTargetAtTime(0, t, 0.05); d.rollOn = false; }
   if (d.trOsc){ try { d.trOsc.stop(t); } catch(e){} d.trOsc = null; d.trKey = ''; } d.trans.gain.cancelScheduledValues(t); set(d.trans, 1);
   set(d.dry, nm === 'flanger' ? 1 - 0.4 * a : nm === 'crush' ? 1 - 0.85 * a : 1);
   if (nm === 'flanger'){ d.flL.o.frequency.setTargetAtTime(0.18, t, 0.1); d.flFb.gain.setTargetAtTime(0.75, t, 0.1); }
   if (nm === 'phaser'){ set(d.phWet, a * 0.9); d.phL.o.frequency.setTargetAtTime(v.rate ?? 0.6, t, 0.05); d.phFb.gain.setTargetAtTime(0.55, t, 0.05); }
   if (nm === 'filter'){ set(d.afWet, a); d.afL.o.frequency.setTargetAtTime(v.rate ?? 1.2, t, 0.05); d.afF.Q.setValueAtTime(6, t); }
+  if (endRoll){   // fin du roll NETTE : la répétition s'arrête ~12 ms AVANT le temps, puis le son revient pile sur le temps (pas de traîne ni de saccade)
+    const e = Math.max(ctx.currentTime + 0.008, t - 0.012), dv = nm === 'flanger' ? 1 - 0.4 * a : nm === 'crush' ? 1 - 0.85 * a : 1, td = Math.max(e + 0.002, t - 0.003);
+    d.rlWet.gain.cancelScheduledValues(e - 0.006); d.rlWet.gain.setValueAtTime(1, e - 0.006); d.rlWet.gain.linearRampToValueAtTime(0, e);
+    d.rlFb.gain.cancelScheduledValues(e); d.rlFb.gain.setValueAtTime(0, e);
+    d.dry.gain.cancelScheduledValues(e - 0.006); d.dry.gain.setValueAtTime(0, e - 0.006); d.dry.gain.setValueAtTime(0, td); d.dry.gain.linearRampToValueAtTime(dv, td + 0.003);
+  }
   if (nm === 'roll'){   // beat repeat : on capte une tranche (div temps) puis on la répète, le son direct se tait
     const dt = (v.div ?? 0.25) * 60 / (d.bpm * d.rate);
     d.rlD.delayTime.setValueAtTime(dt, t); d.rlIn.gain.cancelScheduledValues(t); d.rlIn.gain.setValueAtTime(1, t); d.rlIn.gain.setValueAtTime(0, t + dt);
